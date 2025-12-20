@@ -1,0 +1,60 @@
+services:
+  collector:
+    build: ./collector
+    container_name: cliproxy-collector
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SECRET_KEY=${SUPABASE_SECRET_KEY}
+      - CLIPROXY_URL=${CLIPROXY_URL:-http://host.docker.internal:8317}
+      - CLIPROXY_MANAGEMENT_KEY=${CLIPROXY_MANAGEMENT_KEY}
+      - COLLECTOR_INTERVAL_SECONDS=${COLLECTOR_INTERVAL_SECONDS:-300}
+      - COLLECTOR_TRIGGER_PORT=5001
+      - TIMEZONE_OFFSET_HOURS=${TIMEZONE_OFFSET_HOURS:-7}
+    expose:
+      - "5001"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/api/collector/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - cliproxy-network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - VITE_SUPABASE_URL=${SUPABASE_URL}
+        - VITE_SUPABASE_PUBLISHABLE_KEY=${SUPABASE_PUBLISHABLE_KEY}
+        - VITE_COLLECTOR_URL=
+    container_name: cliproxy-dashboard
+    ports:
+      - "8417:80"
+    depends_on:
+      collector:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - cliproxy-network
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  cliproxy-network:
+    driver: bridge

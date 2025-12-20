@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Environment Test</title>
+</head>
+<body>
+    <h1>Testing Environment Variables</h1>
+    <div id="output"></div>
+
+    <script type="module">
+        const output = document.getElementById('output');
+
+        // Check if env vars are loaded
+        const supabaseUrl = import.meta.env.SUPABASE_URL;
+        const supabaseKey = import.meta.env.SUPABASE_PUBLISHABLE_KEY;
+
+        output.innerHTML = `
+            <p><strong>SUPABASE_URL:</strong> ${supabaseUrl || 'NOT FOUND'}</p>
+            <p><strong>SUPABASE_PUBLISHABLE_KEY:</strong> ${supabaseKey ? supabaseKey.substring(0, 20) + '...' : 'NOT FOUND'}</p>
+            <p><strong>All env vars:</strong> ${JSON.stringify(import.meta.env, null, 2)}</p>
+        `;
+
+        // Try to initialize Supabase
+        if (!supabaseUrl || !supabaseKey) {
+            output.innerHTML += '<p style="color: red;"><strong>ERROR: Missing environment variables!</strong></p>';
+            output.innerHTML += '<p>Make sure .env file exists and Vite is configured to load SUPABASE_ prefix</p>';
+        } else {
+            output.innerHTML += '<p style="color: green;"><strong>SUCCESS: Environment variables loaded!</strong></p>';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+{
+    "providers": {
+        "chatgpt": {
+            "name": "ChatGPT Plus",
+            "icon": "🤖",
+            "enabled": true,
+            "subscription": "$20/month",
+            "tokenLimits": {
+                "inputTokens": null,
+                "outputTokens": null,
+                "totalTokens": null,
+                "note": "Unlimited for Plus plan"
+            },
+            "limits": [
+                {
+                    "id": "session",
+                    "name": "5 hour usage limit",
+                    "limit": 80,
+                    "resetType": "rolling",
+                    "windowHours": 5
+                },
+                {
+                    "id": "weekly",
+                    "name": "Weekly usage limit",
+                    "limit": 500,
+                    "resetType": "scheduled",
+                    "resetDay": "saturday",
+                    "resetTime": "11:59"
+                }
+            ]
+        },
+        "claude": {
+            "name": "Claude Pro",
+            "icon": "🟣",
+            "enabled": true,
+            "subscription": "$20/month",
+            "tokenLimits": {
+                "inputTokens": null,
+                "outputTokens": null,
+                "totalTokens": null,
+                "note": "Token-based with message limits"
+            },
+            "limits": [
+                {
+                    "id": "session",
+                    "name": "5 hour usage limit",
+                    "limit": 45,
+                    "resetType": "rolling",
+                    "windowHours": 5
+                },
+                {
+                    "id": "weekly",
+                    "name": "Weekly usage limit",
+                    "limit": 300,
+                    "resetType": "scheduled",
+                    "resetDay": "saturday",
+                    "resetTime": "11:59"
+                }
+            ]
+        },
+        "gemini": {
+            "name": "Gemini",
+            "icon": "💎",
+            "enabled": true,
+            "subscription": "Free",
+            "tokenLimits": {
+                "inputTokens": 1000000,
+                "outputTokens": 100000,
+                "totalTokens": null,
+                "requestsPerMinute": 60,
+                "note": "Per day limits"
+            },
+            "limits": [
+                {
+                    "id": "daily",
+                    "name": "Daily usage limit",
+                    "limit": 500,
+                    "resetType": "scheduled",
+                    "resetDay": "daily",
+                    "resetTime": "00:00"
+                }
+            ]
+        }
+    },
+    "providerDetection": {
+        "gpt": "chatgpt",
+        "o1": "chatgpt",
+        "o3": "chatgpt",
+        "codex": "chatgpt",
+        "claude": "claude",
+        "gemini": "gemini"
+    }
+}

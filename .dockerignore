@@ -1,0 +1,35 @@
+# Ignore environment files with secrets
+.env
+.env.local
+.env.production
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in production)
+docs/
+*.md
+!README.md
+
+# Local development artifacts
+collector/venv/
+collector/__pycache__/
+collector/*.log
+frontend/node_modules/
+frontend/dist/
+
+# Claude/Gemini AI artifacts
+.claude/
+.agent/
+.shared/

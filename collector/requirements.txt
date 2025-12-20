@@ -1,0 +1,9 @@
+requests
+supabase
+python-dateutil
+flask
+flask-cors
+python-dotenv
+waitress
+apscheduler
+gunicorn

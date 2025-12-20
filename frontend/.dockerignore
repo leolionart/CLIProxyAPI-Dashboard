@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output (will be created during Docker build)
+dist/
+
+# Environment files
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
