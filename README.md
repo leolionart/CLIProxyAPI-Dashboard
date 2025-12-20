@@ -3,6 +3,12 @@
 🎛️ **Real-time monitoring dashboard for CLIProxy API usage** - Track requests, tokens, costs, and rate limits across all your AI models.
 
 ![Dashboard Preview](https://img.shields.io/badge/status-active-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Docker](https://img.shields.io/badge/docker-ready-blue)
+
+<p align="center">
+  <img src="docs/assets/dashboard_preview.png" alt="CLIProxy Dashboard Preview" width="100%">
+</p>
 
 ## 📋 Overview
 
