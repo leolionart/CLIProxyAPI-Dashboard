@@ -14,5 +14,14 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+
+    - name: Build Collector image
+      run: docker build ./collector --file ./collector/Dockerfile --tag cliproxy-collector:$(date +%s)
+
+    - name: Build Frontend image
+      run: |
+        docker build ./frontend \
+          --file ./frontend/Dockerfile \
+          --build-arg VITE_SUPABASE_URL=https://placeholder.supabase.co \
+          --build-arg VITE_SUPABASE_PUBLISHABLE_KEY=placeholder \
+          --tag cliproxy-dashboard:$(date +%s)
