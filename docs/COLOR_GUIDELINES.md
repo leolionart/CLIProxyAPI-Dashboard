@@ -60,9 +60,7 @@ To help users easily identify AI service providers, we use a separate brand colo
 
 ## 3. State-Based Colors
 
-Colors are also used to reflect data status, especially in progress bars and rate limits.
-
-The `getQuotaStatusColor(percentage)` function in `frontend/src/lib/rateLimits.js` is responsible for returning the color corresponding to the remaining percentage of the limit:
+Colors are also used to reflect data status, especially in progress bars and quota indicators:
 - **High (Safe):** Green/Emerald (`--color-success`).
 - **Medium (Warning):** Yellow (`--color-primary`).
 - **Low (Danger):** Red (`--color-danger`).

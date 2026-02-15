@@ -766,50 +766,6 @@ body {
   color: #000;
 }
 
-/* ===== Rate Limit Card ===== */
-.rate-limit-card {
-  background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: var(--glass-border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  animation: slideUp 0.5s ease forwards;
-  position: relative;
-  margin-bottom: var(--space-lg);
-}
-
-.rate-limit-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.3), transparent);
-}
-
-.rate-limit-card .card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: var(--space-lg);
-  border-bottom: 1px solid var(--color-border-glass);
-}
-
-.rate-limit-card .card-header h3 {
-  font-family: var(--font-heading);
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text);
-  letter-spacing: -0.01em;
-}
-
-.rate-limit-card .card-subtitle {
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-
 /* Platforms Grid */
 .platforms-grid {
   display: grid;

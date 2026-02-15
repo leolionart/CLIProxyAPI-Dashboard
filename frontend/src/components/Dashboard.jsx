@@ -4,7 +4,7 @@ import {
     XAxis, YAxis, Tooltip, ResponsiveContainer
 } from 'recharts'
 import { BarGraph, PieGraph, DollarSign, Zap, Clock, Moon, Sun, Refresh } from './Icons'
-import RateLimitCard from './RateLimitCard'
+import CredentialStatsCard from './CredentialStatsCard'
 
 
 const COLORS = ['#8b5cf6', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1']
@@ -565,9 +565,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                 />
             </div>
 
-            {/* Rate Limits Prediction */}
-            <RateLimitCard usageData={stats?.raw_data} isDarkMode={isDarkMode} />
-
             {/* Charts Row 1 */}
             <div className="charts-row">
                 <div className="chart-card chart-large">
@@ -824,6 +821,9 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                     </table>
                 </div>
             </div>
+
+            {/* Credential Stats - Usage rates and limits per credential */}
+            <CredentialStatsCard isDarkMode={isDarkMode} />
         </div>
     )
 }

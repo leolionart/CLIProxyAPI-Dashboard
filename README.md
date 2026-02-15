@@ -1,6 +1,6 @@
 # CLIProxy Dashboard
 
-Real-time monitoring dashboard for CLIProxy API usage - Track requests, tokens, costs, and rate limits across all your AI models.
+Real-time monitoring dashboard for CLIProxy API usage - Track requests, tokens, costs, and OAuth credentials across all your AI models.
 
 ![Dashboard Preview](https://img.shields.io/badge/status-active-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
@@ -16,8 +16,8 @@ Real-time monitoring dashboard for CLIProxy API usage - Track requests, tokens, 
 - **Cost Estimation** - Calculate estimated API costs per model
 - **Date Range Filters** - View Today, Yesterday, 7 Days, 30 Days, or All Time
 - **Hourly Breakdown** - See usage patterns throughout the day
-- **Rate Limit Tracking** - Monitor remaining quotas for each provider
 - **Model Breakdown** - Usage and cost per AI model
+- **OAuth Credentials** - Monitor Antigravity, Codex, and Gemini CLI credentials with subscription status
 
 ---
 
@@ -95,6 +95,7 @@ docker compose up -d
 | `CLIPROXY_URL` | CLIProxy Management API URL | `http://host.docker.internal:8317` |
 | `CLIPROXY_MANAGEMENT_KEY` | CLIProxy management secret | Required |
 | `COLLECTOR_INTERVAL_SECONDS` | Polling interval | `300` (5 min) |
+| `OAUTH_SYNC_INTERVAL_SECONDS` | OAuth credentials sync interval | `900` (15 min) |
 | `TIMEZONE_OFFSET_HOURS` | Your timezone offset from UTC | `7` |
 
 ---
@@ -200,38 +201,6 @@ CREATE TABLE IF NOT EXISTS model_pricing (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Table for rate limit configurations
-CREATE TABLE IF NOT EXISTS rate_limit_configs (
-    id BIGSERIAL PRIMARY KEY,
-    provider VARCHAR(50) NOT NULL,
-    tier_name VARCHAR(50) NOT NULL,
-    model_pattern VARCHAR(255) NOT NULL,
-    token_limit BIGINT,
-    request_limit INTEGER,
-    context_window INTEGER,
-    window_minutes INTEGER NOT NULL DEFAULT 1440,
-    reset_strategy VARCHAR(20) NOT NULL DEFAULT 'daily',
-    reset_anchor_timestamp TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Table for tracking current rate limit status
-CREATE TABLE IF NOT EXISTS rate_limit_status (
-    id BIGSERIAL PRIMARY KEY,
-    config_id BIGINT REFERENCES rate_limit_configs(id) ON DELETE CASCADE,
-    remaining_tokens BIGINT,
-    remaining_requests INTEGER,
-    used_tokens BIGINT DEFAULT 0,
-    used_requests INTEGER DEFAULT 0,
-    percentage INTEGER DEFAULT 0,
-    status_label VARCHAR(50),
-    window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    next_reset TIMESTAMPTZ,
-    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT unique_status_per_config UNIQUE (config_id)
-);
-
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_usage_snapshots_collected_at ON usage_snapshots(collected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_model_usage_snapshot_id ON model_usage(snapshot_id);
@@ -243,17 +212,11 @@ ALTER TABLE usage_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE model_usage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_stats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE model_pricing ENABLE ROW LEVEL SECURITY;
-ALTER TABLE rate_limit_configs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE rate_limit_status ENABLE ROW LEVEL SECURITY;
-
 -- Create policies for read access
 CREATE POLICY "Allow read access" ON usage_snapshots FOR SELECT USING (true);
 CREATE POLICY "Allow read access" ON model_usage FOR SELECT USING (true);
 CREATE POLICY "Allow read access" ON daily_stats FOR SELECT USING (true);
 CREATE POLICY "Allow read access" ON model_pricing FOR SELECT USING (true);
-CREATE POLICY "Allow read access" ON rate_limit_configs FOR SELECT USING (true);
-CREATE POLICY "Allow read access" ON rate_limit_status FOR SELECT USING (true);
-
 -- Create policies for service role (Collector)
 CREATE POLICY "Allow service insert" ON usage_snapshots FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow service update" ON usage_snapshots FOR UPDATE USING (true);
@@ -261,8 +224,6 @@ CREATE POLICY "Allow service insert" ON model_usage FOR INSERT WITH CHECK (true)
 CREATE POLICY "Allow service upsert" ON daily_stats FOR ALL USING (true);
 CREATE POLICY "Allow service insert" ON model_pricing FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow service update" ON model_pricing FOR UPDATE USING (true);
-CREATE POLICY "Allow service all" ON rate_limit_configs FOR ALL USING (true);
-CREATE POLICY "Allow service all" ON rate_limit_status FOR ALL USING (true);
 ```
 
 #### 3. Get Your API Keys
@@ -327,7 +288,6 @@ docker compose -f docker-compose.dev.yml up -d
 cliproxy-dashboard/
 ├── collector/           # Python data collector
 │   ├── main.py         # Collector logic
-│   ├── rate_limiter.py # Rate limit tracking
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── frontend/           # React dashboard
@@ -367,8 +327,7 @@ cliproxy-dashboard/
 4. **Cost Breakdown** - Pie chart of costs by model
 5. **Model Usage** - Bar chart of requests per model
 6. **API Keys** - Usage breakdown by API key
-7. **Rate Limits** - Remaining quota for each provider
-8. **Cost Details** - Detailed cost table by model
+7. **Cost Details** - Detailed cost table by model
 
 ### Default Model Pricing (USD per 1M tokens)
 

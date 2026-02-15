@@ -233,7 +233,6 @@ function StatCard({ title, value, icon }) {
 cliproxy-dashboard/
 ├── collector/              # Python data collector
 │   ├── main.py            # Main collector logic
-│   ├── rate_limiter.py    # Rate limit tracking
 │   ├── Dockerfile
 │   └── requirements.txt
 │
@@ -241,8 +240,7 @@ cliproxy-dashboard/
 │   ├── src/
 │   │   ├── App.jsx       # Main app component
 │   │   ├── components/   # Reusable components
-│   │   │   ├── Dashboard.jsx
-│   │   │   └── RateLimitCard.jsx
+│   │   │   └── Dashboard.jsx
 │   │   └── lib/
 │   │       └── supabase.js
 │   ├── Dockerfile

@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, Blueprint
 from flask_cors import CORS
 from supabase import create_client, Client
-from rate_limiter import RateLimiter
+from credential_stats_sync import sync_credential_stats
 from waitress import serve
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -90,7 +90,6 @@ LLM_PRICES_URL = "https://www.llm-prices.com/current-v1.json"
 supabase: Optional[Client] = None
 remote_pricing_cache: Dict[str, Dict[str, float]] = {}
 remote_pricing_last_fetch: float = 0
-rate_limiter: Optional[RateLimiter] = None
 
 # --- Flask App Setup ---
 flask_app = Flask(__name__)
@@ -109,101 +108,33 @@ def trigger_sync_endpoint():
     logger.info("Manual trigger received for full sync.")
     sync_thread = threading.Thread(target=run_full_sync_once)
     sync_thread.start()
-    return jsonify({"message": "Full data collection and rate limit sync process triggered."}), 202
+    return jsonify({"message": "Full data collection process triggered."}), 202
 
-@api_bp.route('/reset/<int:config_id>', methods=['POST'])
-def reset_limit_endpoint(config_id: int):
-    """Endpoint to reset the rate limit status for a specific configuration.
-    
-    This resets the usage counters in rate_limit_status table, effectively
-    setting remaining quota to 100% by zeroing out used tokens/requests.
-    """
-    logger.info(f"Received reset request for config_id: {config_id}")
-    try:
-        if not supabase:
-            return jsonify({"status": "error", "message": "Supabase not initialized"}), 500
+@api_bp.route('/credential-stats/sync', methods=['POST'])
+def trigger_credential_stats_sync():
+    """Endpoint to manually trigger credential usage stats sync."""
+    logger.info("Manual trigger received for credential stats sync.")
 
-        current_time_vn = datetime.now(APP_TIMEZONE).isoformat()
-        
-        # First, get the config to know the limits
-        config_resp = supabase.table('rate_limit_configs').select(
-            'id, token_limit, request_limit'
-        ).eq('id', config_id).execute()
-        
-        if not config_resp.data:
-            logger.warning(f"No config found for id {config_id} to reset.")
-            return jsonify({"error": f"Configuration with id {config_id} not found."}), 404
-        
-        config = config_resp.data[0]
-        token_limit = config.get('token_limit') or 0
-        request_limit = config.get('request_limit') or 0
-        
-        # Calculate label for display
-        if token_limit > 0:
-            label = f"0/{token_limit:,} Tokens"
-        elif request_limit > 0:
-            label = f"0/{request_limit:,} Requests"
-        else:
-            label = "Unlimited"
-        
-        # Reset the status in rate_limit_status table
-        status_data = {
-            'config_id': config_id,
-            'remaining_tokens': token_limit,
-            'remaining_requests': request_limit,
-            'used_tokens': 0,
-            'used_requests': 0,
-            'percentage': 100,
-            'status_label': label,
-            'window_start': current_time_vn,
-            'last_updated': current_time_vn,
-            'next_reset': None  # Will be recalculated by next sync
-        }
-        
-        # 1. Update status immediate display
-        supabase.table('rate_limit_status').upsert(
-            status_data, 
-            on_conflict='config_id'
-        ).execute()
+    def credential_stats_task():
+        try:
+            stats = sync_credential_stats(CLIPROXY_URL, CLIPROXY_MANAGEMENT_KEY, supabase)
+            logger.info(f"Credential stats sync completed: {stats}")
+        except Exception as e:
+            logger.error(f"Credential stats sync failed: {e}", exc_info=True)
 
-        # 2. IMPORTANT: Update the config with a reset anchor so the background worker respects this reset
-        # until the next natural window start (e.g. next day or next week)
-        supabase.table('rate_limit_configs').update({
-            'reset_anchor_timestamp': current_time_vn
-        }).eq('id', config_id).execute()
-
-        logger.info(f"Successfully reset rate limit status AND anchor for config_id: {config_id}")
-
-        return jsonify({
-            "message": f"Successfully reset rate limit for config id {config_id}.",
-            "new_status": {
-                "percentage": 100,
-                "label": label
-            }
-        }), 200
-    except Exception as e:
-        logger.error(f"Failed to reset config_id {config_id}: {e}", exc_info=True)
-        return jsonify({"error": "An internal error occurred."}), 500
+    sync_thread = threading.Thread(target=credential_stats_task)
+    sync_thread.start()
+    return jsonify({"message": "Credential stats sync triggered."}), 202
 
 # --- Sync Functions ---
-def run_rate_limit_sync_only():
-    """Helper to run only the rate limit sync process."""
-    if rate_limiter:
-        logger.info("Running rate limit sync process...")
-        rate_limiter.sync_limits()
-        logger.info("Rate limit sync process finished.")
-    else:
-        logger.error("Cannot run rate limit sync: RateLimiter not initialized.")
-
 def run_full_sync_once():
-    """Helper function to run a single full sync process (data collection + rate limits)."""
+    """Helper function to run a single full sync process (data collection)."""
     logger.info("Fetching usage data...")
     data = fetch_usage_data()
     if data:
         store_usage_data(data)
     else:
         logger.warning("No data received from CLIProxy.")
-    run_rate_limit_sync_only()
 
 # --- Core Logic Functions (fetch_remote_pricing, init_supabase, etc.) ---
 # These functions remain largely the same as before.
@@ -627,7 +558,7 @@ def store_usage_data(data: Dict[str, Any]) -> bool:
 # --- Main Application ---
 def main():
     """Main collector startup."""
-    global supabase, rate_limiter
+    global supabase
     logger.info("Starting CLIProxy Usage Collector")
 
     # Initialize Supabase
@@ -638,17 +569,27 @@ def main():
         logger.critical(f"CRITICAL: Failed to initialize Supabase: {e}", exc_info=True)
         return
 
-    # Initialize Rate Limiter
-    rate_limiter = RateLimiter(supabase)
-
     # Register the API blueprint
     flask_app.register_blueprint(api_bp)
 
     # Start the background scheduler
     scheduler = BackgroundScheduler(daemon=True)
+
+    # Schedule usage data collection (every COLLECTOR_INTERVAL seconds)
     scheduler.add_job(run_full_sync_once, 'interval', seconds=COLLECTOR_INTERVAL)
+
+    # Schedule credential usage stats sync (runs with usage collection)
+    scheduler.add_job(
+        lambda: sync_credential_stats(CLIPROXY_URL, CLIPROXY_MANAGEMENT_KEY, supabase),
+        'interval',
+        seconds=COLLECTOR_INTERVAL,
+        id='credential_stats_sync',
+        next_run_time=datetime.now() + timedelta(seconds=10)  # Run 10s after startup
+    )
+
     scheduler.start()
     logger.info(f"Background sync scheduled every {COLLECTOR_INTERVAL} seconds.")
+    logger.info(f"Credential stats sync scheduled every {COLLECTOR_INTERVAL} seconds.")
 
     # Start the Flask app using Waitress
     logger.info(f"Flask server starting on http://0.0.0.0:{TRIGGER_PORT}")

@@ -55,8 +55,6 @@ Before starting, ensure you have:
 - `model_usage` - Per-model usage breakdown
 - `daily_stats` - Aggregated daily statistics
 - `model_pricing` - Cost calculation configuration
-- `rate_limit_configs` - Rate limit configurations
-- `rate_limit_status` - Current rate limit tracking
 
 ### 1.3 Get API Keys
 

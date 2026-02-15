@@ -84,12 +84,9 @@ http://localhost:8417
 - `model_usage`: Per-model breakdown of each snapshot (linked via snapshot_id FK), includes token counts and estimated cost
 - `daily_stats`: Daily aggregated statistics (upserted daily), used for efficient date range queries
 - `model_pricing`: Pricing configuration (USD per 1M tokens), supports pattern matching for model names
-- `rate_limit_configs`: Rate limit configurations per provider/tier (token limits, request limits, reset strategy)
-- `rate_limit_status`: Current rate limit status tracking (linked via config_id FK)
 
 **Key Relationships:**
 - `model_usage.snapshot_id` → `usage_snapshots.id` (CASCADE DELETE)
-- `rate_limit_status.config_id` → `rate_limit_configs.id` (CASCADE DELETE)
 
 ### Collector Architecture (collector/main.py)
 
@@ -104,11 +101,6 @@ http://localhost:8417
    - Calculates usage deltas by comparing current vs previous snapshots
    - Stores snapshots, model usage, and updates daily_stats
 
-3. **RateLimiter** (collector/rate_limiter.py):
-   - Syncs rate limit status based on actual usage
-   - Handles daily/rolling window resets
-   - Calculates remaining tokens/requests per provider
-
 **Critical Implementation Details:**
 - **Delta Calculation**: The collector stores cumulative snapshots from CLIProxy but calculates **daily deltas** by subtracting previous day's final snapshot from current snapshot. This handles CLIProxy restarts gracefully.
 - **Timezone Handling**: Uses `TIMEZONE_OFFSET_HOURS` environment variable (default: 7 for UTC+7). All date boundaries are calculated in local time then converted to UTC for database storage.
@@ -119,7 +111,6 @@ http://localhost:8417
 **Main Components:**
 - `App.jsx`: Main application shell, handles date range selection and data fetching from Supabase
 - `Dashboard.jsx`: Main dashboard component with all visualization cards
-- `RateLimitCard.jsx`: Rate limit tracking component with progress bars
 - `Icons.jsx`: Reusable SVG icon components
 
 **State Management:**
@@ -198,7 +189,3 @@ Cost estimation uses pattern matching against `model_pricing` table:
 - Check that `daily_stats` table has entries for the date range
 - Today/Yesterday use daily deltas; longer ranges show cumulative totals
 
-**Rate Limits Not Updating:**
-- Ensure `rate_limit_configs` table is populated
-- Check collector logs for RateLimiter errors
-- Verify `model_pattern` in configs matches actual model names from usage data

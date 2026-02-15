@@ -104,7 +104,7 @@
                 const { createClient } = await import('@supabase/supabase-js');
                 const client = createClient(supabaseUrl, supabaseKey);
 
-                const tables = ['usage_snapshots', 'model_usage', 'daily_stats', 'model_pricing', 'rate_limit_configs', 'rate_limit_status'];
+                const tables = ['usage_snapshots', 'model_usage', 'daily_stats', 'model_pricing'];
                 let html = '';
 
                 for (const table of tables) {
