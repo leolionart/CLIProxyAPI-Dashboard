@@ -29,6 +29,21 @@
   --color-cyan: #06B6D4;
   /* Cyan - Accent */
 
+  /* AI Provider Brand Colors */
+  --color-brand-openai: #10a37f;
+  --color-brand-anthropic: #d97757;
+  --color-brand-google: #4285f4;
+  --color-brand-google-alt: #34a853;
+  --color-brand-google-warn: #fbbc04;
+  --color-brand-deepseek: #8b5cf6;
+  --color-brand-qwen: #ff6a00;
+  --color-brand-meta: #0668e1;
+  --color-brand-mistral: #6366f1;
+  --color-brand-xai: #64748b;
+  --color-brand-cohere: #14b8a6;
+  --color-brand-ai21: #a855f7;
+  --color-brand-unknown: #94a3b8;
+
   /* Text */
   --color-text: #F8FAFC;
   --color-text-secondary: #94A3B8;

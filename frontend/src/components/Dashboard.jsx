@@ -5,78 +5,7 @@ import {
 } from 'recharts'
 import { BarGraph, PieGraph, DollarSign, Zap, Clock, Moon, Sun, Refresh } from './Icons'
 import CredentialStatsCard from './CredentialStatsCard'
-
-
-const COLORS = ['#8b5cf6', '#3b82f6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#6366f1']
-
-// Brand colors for AI providers (optimized for contrast and recognition)
-const BRAND_COLORS = {
-    // OpenAI - Green (official brand color)
-    'openai': '#10a37f',
-    'gpt': '#10a37f',
-    'o1': '#10a37f',
-    'o3': '#10a37f',
-    'chatgpt': '#10a37f',
-
-    // Anthropic - Orange/Copper (official brand color)
-    'anthropic': '#d97757',
-    'claude': '#d97757',
-
-    // Google - Multi-color but primarily Blue for Gemini
-    'google': '#4285f4',
-    'gemini': '#4285f4',
-    'palm': '#34a853',
-    'bard': '#fbbc04',
-
-    // DeepSeek - Purple
-    'deepseek': '#8b5cf6',
-
-    // Alibaba/Qwen - Orange
-    'qwen': '#ff6a00',
-    'alibaba': '#ff6a00',
-
-    // Meta - Blue
-    'meta': '#0668e1',
-    'llama': '#0668e1',
-
-    // Mistral - Dark Purple/Indigo
-    'mistral': '#6366f1',
-
-    // xAI/Grok - Dark slate
-    'grok': '#64748b',
-    'xai': '#64748b',
-
-    // Cohere - Teal
-    'cohere': '#14b8a6',
-
-    // AI21 - Purple
-    'ai21': '#a855f7',
-    'jurassic': '#a855f7',
-
-    // Fallback
-    'unknown': '#94a3b8'
-}
-
-// Intelligent color mapping based on model provider branding
-const getModelColor = (modelName) => {
-    if (!modelName) return BRAND_COLORS.unknown
-
-    const modelLower = modelName.toLowerCase()
-
-    // Check each brand keyword
-    for (const [keyword, color] of Object.entries(BRAND_COLORS)) {
-        if (modelLower.includes(keyword)) {
-            return color
-        }
-    }
-
-    // Fallback to hash-based color for unknown models (for consistency)
-    let hash = 0
-    for (let i = 0; i < modelName.length; i++) {
-        hash = modelName.charCodeAt(i) + ((hash << 5) - hash)
-    }
-    return COLORS[Math.abs(hash) % COLORS.length]
-}
+import { getModelColor } from '../lib/brandColors'
 
 // Date Range Options - using identifiers for precise boundary logic
 const DATE_RANGES = [
@@ -823,7 +752,9 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             </div>
 
             {/* Credential Stats - Usage rates and limits per credential */}
-            <CredentialStatsCard isDarkMode={isDarkMode} />
+            <div className="charts-row">
+                <CredentialStatsCard isDarkMode={isDarkMode} />
+            </div>
         </div>
     )
 }

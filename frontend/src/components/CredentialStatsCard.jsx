@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
+import { getProviderDisplay } from '../lib/brandColors'
 import './CredentialStatsCard.css'
 
 /**
@@ -12,23 +13,6 @@ import './CredentialStatsCard.css'
  * Data source: CLIProxy /v0/management/usage → details[] array
  * Each request detail contains: source, auth_index, tokens, failed
  */
-
-const PROVIDER_CONFIG = {
-  'codex': { name: 'Codex', color: '#ff6b35' },
-  'claude': { name: 'Claude', color: '#d97757' },
-  'antigravity': { name: 'Antigravity', color: '#d97757' },
-  'gemini-cli': { name: 'Gemini CLI', color: '#4285f4' },
-  'gemini': { name: 'Gemini', color: '#4285f4' },
-  'gemini-api-key': { name: 'Gemini Key', color: '#34a853' },
-  'qwen': { name: 'Qwen', color: '#ff6a00' },
-  'vertex': { name: 'Vertex AI', color: '#34a853' },
-  'oauth': { name: 'OAuth', color: '#8b5cf6' },
-  'api-key': { name: 'API Key', color: '#64748b' },
-  'unknown': { name: 'Unknown', color: '#94a3b8' },
-}
-
-const getProviderConfig = (provider) =>
-  PROVIDER_CONFIG[provider?.toLowerCase()] || { name: provider || 'Unknown', color: '#94a3b8' }
 
 const getSuccessColor = (rate) => {
   if (rate >= 95) return '#10b981'
@@ -296,7 +280,7 @@ function CredentialsTable({ items, onSort, SortIcon, expandedRow, setExpandedRow
         </thead>
         <tbody>
           {items.map((cred) => {
-            const pc = getProviderConfig(cred.provider)
+            const pc = getProviderDisplay(cred.provider)
             const rateColor = getSuccessColor(cred.success_rate || 0)
             const key = cred.auth_index || cred.source || cred.email
             const isExpanded = expandedRow === key
@@ -308,7 +292,7 @@ function CredentialsTable({ items, onSort, SortIcon, expandedRow, setExpandedRow
                 onClick={() => setExpandedRow(isExpanded ? null : key)}
               >
                 <td>
-                  <span className="cred-provider-badge" style={{ background: pc.color }}>
+                  <span className="cred-provider-badge" style={{ background: `var(${pc.colorVar})` }}>
                     {pc.name}
                   </span>
                 </td>
@@ -352,14 +336,14 @@ function CredentialsTable({ items, onSort, SortIcon, expandedRow, setExpandedRow
         const cred = items.find((c) => (c.auth_index || c.source || c.email) === expandedRow)
         if (!cred?.models || Object.keys(cred.models).length === 0) return null
 
-        const pc = getProviderConfig(cred.provider)
+        const pc = getProviderDisplay(cred.provider)
         const modelEntries = Object.entries(cred.models)
           .sort(([, a], [, b]) => (b.requests || 0) - (a.requests || 0))
 
         return (
           <div className="cred-detail-panel">
             <div className="cred-detail-header">
-              <span className="cred-provider-badge" style={{ background: pc.color }}>{pc.name}</span>
+              <span className="cred-provider-badge" style={{ background: `var(${pc.colorVar})` }}>{pc.name}</span>
               <span className="cred-detail-email">{cred.email || cred.source}</span>
             </div>
             <div className="cred-detail-models">
