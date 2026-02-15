@@ -91,9 +91,8 @@ jobs:
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta-frontend.outputs.tags }}
         labels: ${{ steps.meta-frontend.outputs.labels }}
-        build-args: |
-          VITE_SUPABASE_URL=https://placeholder.supabase.co
-          VITE_SUPABASE_PUBLISHABLE_KEY=placeholder
+        # No build-args needed - Dockerfile uses unique placeholders
+        # that get replaced at runtime by docker-entrypoint.sh
         cache-from: type=gha
         cache-to: type=gha,mode=max
 

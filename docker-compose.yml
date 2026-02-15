@@ -36,6 +36,9 @@ services:
     container_name: cliproxy-dashboard
     ports:
       - "8417:80"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_PUBLISHABLE_KEY=${SUPABASE_PUBLISHABLE_KEY}
     depends_on:
       collector:
         condition: service_healthy
