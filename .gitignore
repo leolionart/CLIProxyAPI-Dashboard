@@ -116,3 +116,9 @@ Thumbs.db
 # Test data with potentially sensitive info
 /test-data/
 /sample-data/
+
+# Screenshots (testing artifacts)
+*.png
+
+# Playwright MCP
+.playwright-mcp/
