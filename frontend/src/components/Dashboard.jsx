@@ -5,6 +5,8 @@ import {
 } from 'recharts'
 import { BarGraph, PieGraph, DollarSign, Zap, Clock, Moon, Sun, Refresh } from './Icons'
 import CredentialStatsCard from './CredentialStatsCard'
+import ChartDialog from './ChartDialog'
+import DrilldownPanel from './DrilldownPanel'
 import { getModelColor } from '../lib/brandColors'
 
 // Date Range Options - using identifiers for precise boundary logic
@@ -171,6 +173,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
     const [tableSort, setTableSort] = useState({ column: 'estimated_cost_usd', direction: 'desc' })
     const [endpointSort, setEndpointSort] = useState('requests') // 'requests' or 'cost'
     const [modelSort, setModelSort] = useState('requests') // 'requests' or 'cost'
+    const [drilldownData, setDrilldownData] = useState(null)
     const [isDarkMode, setIsDarkMode] = useState(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('theme')
@@ -506,7 +509,12 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                     </div>
                     <div className="chart-body">
                         <ResponsiveContainer width="100%" height={220}>
-                            <AreaChart data={requestTimeRange === 'hour' ? hourlyData : dailyChartData}>
+                            <AreaChart data={requestTimeRange === 'hour' ? hourlyData : dailyChartData} onClick={(data) => {
+                                if (data?.activePayload?.[0]?.payload?.models) {
+                                    const point = data.activePayload[0].payload
+                                    setDrilldownData({ label: point.time, data: point, chartType: 'requests' })
+                                }
+                            }}>
                                 <defs>
                                     <linearGradient id="requestGradient" x1="0" y1="0" x2="0" y2="1">
                                         <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -538,7 +546,19 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                     <div className="chart-body pie-container">
                         {costBreakdown.length > 0 ? (
                             <ResponsiveContainer width="100%" height={200}>
-                                <PieChart>
+                                <PieChart onClick={() => {
+                                    if (costBreakdown.length > 0) {
+                                        const models = {}
+                                        costBreakdown.forEach(m => {
+                                            models[m.model_name] = {
+                                                requests: m.request_count,
+                                                tokens: m.total_tokens,
+                                                cost: m.estimated_cost_usd
+                                            }
+                                        })
+                                        setDrilldownData({ label: 'All Models', data: { models }, chartType: 'cost', title: 'Cost Breakdown — All Models' })
+                                    }
+                                }}>
                                     <Pie
                                         data={costBreakdown}
                                         dataKey="estimated_cost_usd"
@@ -578,7 +598,12 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                     </div>
                     <div className="chart-body">
                         <ResponsiveContainer width="100%" height={200}>
-                            <AreaChart data={tokenTimeRange === 'hour' ? hourlyData : dailyChartData}>
+                            <AreaChart data={tokenTimeRange === 'hour' ? hourlyData : dailyChartData} onClick={(data) => {
+                                if (data?.activePayload?.[0]?.payload?.models) {
+                                    const point = data.activePayload[0].payload
+                                    setDrilldownData({ label: point.time, data: point, chartType: 'tokens' })
+                                }
+                            }}>
                                 <defs>
                                     <linearGradient id="tokenGradient" x1="0" y1="0" x2="0" y2="1">
                                         <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
@@ -655,7 +680,12 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                     <div className="chart-body">
                         {endpointUsage.length > 0 ? (
                             <ResponsiveContainer width="100%" height={Math.max(200, endpointUsage.length * 45)}>
-                                <BarChart data={endpointUsage} layout="vertical" margin={{ left: 10, right: 150 }}>
+                                <BarChart data={endpointUsage} layout="vertical" margin={{ left: 10, right: 150 }} onClick={(data) => {
+                                    if (data?.activePayload?.[0]?.payload?.models) {
+                                        const point = data.activePayload[0].payload
+                                        setDrilldownData({ label: point.endpoint, data: point, chartType: 'apikeys' })
+                                    }
+                                }}>
                                     <XAxis type="number" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
                                     <YAxis
                                         type="category"
@@ -721,7 +751,34 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                         </thead>
                         <tbody>
                             {costBreakdown.length > 0 ? costBreakdown.map((m, i) => (
-                                <tr key={i}>
+                                <tr key={i} className="clickable-row" onClick={() => {
+                                    // Find this model's usage per API key
+                                    const apiKeyRows = endpointUsage
+                                        .filter(ep => ep.models?.[m.model_name])
+                                        .map(ep => {
+                                            const md = ep.models[m.model_name]
+                                            return {
+                                                _key: ep.endpoint,
+                                                apiKey: ep.endpoint,
+                                                requests: md.requests || md.request_count || 0,
+                                                tokens: md.tokens || md.total_tokens || 0,
+                                                cost: md.cost || md.estimated_cost_usd || 0,
+                                            }
+                                        })
+                                        .sort((a, b) => b.requests - a.requests)
+                                    setDrilldownData({
+                                        label: m.model_name,
+                                        title: `${m.model_name} — Per API Key`,
+                                        chartType: 'modelApiKeys',
+                                        columns: [
+                                            { key: 'apiKey', label: 'API Key' },
+                                            { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
+                                            { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
+                                            { key: 'cost', label: 'Cost', render: v => `$${v.toFixed(4)}` },
+                                        ],
+                                        rows: apiKeyRows,
+                                    })
+                                }}>
                                     <td><span className="color-dot" style={{ background: m.color }}></span>{m.model_name}</td>
                                     <td>{formatNumber(m.request_count)}</td>
                                     <td>{formatNumber(m.input_tokens)}</td>
@@ -753,8 +810,52 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
 
             {/* Credential Stats - Usage rates and limits per credential */}
             <div className="charts-row">
-                <CredentialStatsCard isDarkMode={isDarkMode} />
+                <CredentialStatsCard isDarkMode={isDarkMode} onRowClick={(item, type) => {
+                    if (!item?.models || Object.keys(item.models).length === 0) return
+                    const label = type === 'api_key' ? item.api_key_name : (item.email || item.source || 'Unknown')
+                    const modelRows = Object.entries(item.models)
+                        .map(([name, m]) => ({
+                            _key: name,
+                            model: name,
+                            requests: m.requests || 0,
+                            success: m.success || 0,
+                            failed: m.failure || 0,
+                            tokens: m.total_tokens || m.tokens || 0,
+                        }))
+                        .sort((a, b) => b.requests - a.requests)
+                    setDrilldownData({
+                        label,
+                        title: `${label} — Model Breakdown`,
+                        chartType: 'credential',
+                        columns: [
+                            { key: 'model', label: 'Model' },
+                            { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
+                            { key: 'success', label: 'Success', render: v => formatNumber(v) },
+                            { key: 'failed', label: 'Failed', render: (v) => v > 0 ? v : '0' },
+                            { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
+                        ],
+                        rows: modelRows,
+                    })
+                }} />
             </div>
+
+            {/* Drilldown Dialog - shows when clicking a data point on any chart */}
+            <ChartDialog
+                isOpen={drilldownData !== null}
+                onClose={() => setDrilldownData(null)}
+                title={drilldownData?.title || `Breakdown: ${drilldownData?.label || ''}`}
+            >
+                {drilldownData?.columns ? (
+                    <DrilldownPanel
+                        columns={drilldownData.columns}
+                        rows={drilldownData.rows}
+                    />
+                ) : drilldownData ? (
+                    <DrilldownPanel
+                        data={drilldownData.data}
+                    />
+                ) : null}
+            </ChartDialog>
         </div>
     )
 }

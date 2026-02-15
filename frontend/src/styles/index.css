@@ -1751,3 +1751,89 @@ body {
 .dashboard.light .settings-field input[type="time"] {
   color-scheme: light;
 }
+
+/* ===== Chart Dialog (Large Modal) ===== */
+.modal-content-lg {
+  max-width: 900px;
+  max-height: 90vh;
+  width: 95%;
+}
+
+/* ===== Drilldown Panel ===== */
+.drilldown-panel {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  animation: slideUp 0.2s ease;
+}
+
+.drilldown-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.drilldown-table th {
+  padding: 4px 10px;
+  text-align: left;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--color-border-glass);
+}
+
+.drilldown-table td {
+  padding: 5px 10px;
+  color: var(--color-text);
+  font-family: var(--font-heading);
+}
+
+.drilldown-table tbody tr:hover {
+  background: var(--color-bg-hover);
+}
+
+/* ===== Improved Chart Card Hover ===== */
+.chart-card {
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.chart-card:hover {
+  border-color: rgba(245, 158, 11, 0.25);
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.06);
+}
+
+/* ===== Stat Card Icon Hover ===== */
+.stat-card .stat-icon {
+  transition: transform 0.2s ease;
+}
+
+.stat-card:hover .stat-icon {
+  transform: scale(1.15);
+}
+
+/* ===== Crosshair on chart areas ===== */
+.chart-card .recharts-wrapper {
+  cursor: crosshair;
+}
+
+/* ===== Clickable table rows ===== */
+.clickable-row {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.clickable-row:hover {
+  background: var(--color-bg-hover) !important;
+}
+
+/* ===== Drilldown empty state ===== */
+.drilldown-empty {
+  text-align: center;
+  padding: 24px 16px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}

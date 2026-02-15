@@ -60,7 +60,7 @@ const ViewTabs = ({ activeView, onSwitch }) => (
   </div>
 )
 
-export default function CredentialStatsCard() {
+export default function CredentialStatsCard({ onRowClick }) {
   const [data, setData] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [setupRequired, setSetupRequired] = useState(false)
@@ -236,16 +236,18 @@ export default function CredentialStatsCard() {
             items={sortedItems}
             onSort={handleSort}
             SortIcon={SortIcon}
-            expandedRow={expandedRow}
+            expandedRow={onRowClick ? null : expandedRow}
             setExpandedRow={setExpandedRow}
+            onRowClick={onRowClick}
           />
         ) : (
           <ApiKeysTable
             items={sortedItems}
             onSort={handleSort}
             SortIcon={SortIcon}
-            expandedRow={expandedRow}
+            expandedRow={onRowClick ? null : expandedRow}
             setExpandedRow={setExpandedRow}
+            onRowClick={onRowClick}
           />
         )}
       </div>
@@ -263,7 +265,7 @@ export default function CredentialStatsCard() {
 /**
  * Credentials Table View
  */
-function CredentialsTable({ items, onSort, SortIcon, expandedRow, setExpandedRow }) {
+function CredentialsTable({ items, onSort, SortIcon, expandedRow, setExpandedRow, onRowClick }) {
   return (
     <>
       <table className="data-table cred-table">
@@ -289,7 +291,7 @@ function CredentialsTable({ items, onSort, SortIcon, expandedRow, setExpandedRow
               <tr
                 key={key}
                 className={`cred-row ${isExpanded ? 'cred-row-expanded' : ''}`}
-                onClick={() => setExpandedRow(isExpanded ? null : key)}
+                onClick={() => onRowClick ? onRowClick(cred, 'credential') : setExpandedRow(isExpanded ? null : key)}
               >
                 <td>
                   <span className="cred-provider-badge" style={{ background: `var(${pc.colorVar})` }}>
@@ -383,7 +385,7 @@ function CredentialsTable({ items, onSort, SortIcon, expandedRow, setExpandedRow
 /**
  * API Keys Table View
  */
-function ApiKeysTable({ items, onSort, SortIcon, expandedRow, setExpandedRow }) {
+function ApiKeysTable({ items, onSort, SortIcon, expandedRow, setExpandedRow, onRowClick }) {
   return (
     <>
       <table className="data-table cred-table">
@@ -406,7 +408,7 @@ function ApiKeysTable({ items, onSort, SortIcon, expandedRow, setExpandedRow }) 
               <tr
                 key={ak.api_key_name}
                 className={`cred-row ${isExpanded ? 'cred-row-expanded' : ''}`}
-                onClick={() => setExpandedRow(isExpanded ? null : ak.api_key_name)}
+                onClick={() => onRowClick ? onRowClick(ak, 'api_key') : setExpandedRow(isExpanded ? null : ak.api_key_name)}
               >
                 <td>
                   <span className="cred-apikey-badge">{ak.api_key_name}</span>
