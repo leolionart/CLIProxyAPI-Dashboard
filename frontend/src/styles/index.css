@@ -331,24 +331,12 @@ body {
 /* ===== Stats Grid ===== */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--space-lg);
   margin-bottom: var(--space-xl);
 }
 
-@media (max-width: 1400px) {
-  .stats-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (max-width: 900px) {
-  .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 550px) {
+@media (max-width: 768px) {
   .stats-grid {
     grid-template-columns: 1fr;
   }
@@ -520,6 +508,14 @@ body {
   font-weight: 600;
   color: var(--color-text);
   letter-spacing: -0.01em;
+}
+
+/* Chart Controls - container for multiple tab groups */
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 /* Chart Tabs - Match Date Range Selector Style */

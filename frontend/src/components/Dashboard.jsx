@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from 'react'
 import {
-    AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-    XAxis, YAxis, Tooltip, ResponsiveContainer
+    AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+    XAxis, YAxis, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { BarGraph, PieGraph, DollarSign, Zap, Clock, Moon, Sun, Refresh } from './Icons'
+import { BarGraph, PieGraph, DollarSign, Moon, Sun, Refresh } from './Icons'
 import CredentialStatsCard from './CredentialStatsCard'
 import ChartDialog from './ChartDialog'
 import DrilldownPanel from './DrilldownPanel'
@@ -163,16 +163,28 @@ const ApiKeyLabel = ({ x, y, width, height, value, data, isDarkMode }) => {
     )
 }
 
+// Trend configuration for the unified Usage Trends chart
+const TREND_CONFIG = {
+    requests: { stroke: '#3b82f6', name: 'Requests' },
+    tokens: { stroke: '#10b981', name: 'Tokens' },
+    cost: { stroke: '#f59e0b', name: 'Cost' },
+}
+
 function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefreshing, lastUpdated, dateRange, onDateRangeChange, endpointUsage: rawEndpointUsage }) {
     // Auto-select time range based on dateRange: hour for today/yesterday, day for longer ranges
     const defaultTimeRange = (dateRange === 'today' || dateRange === 'yesterday') ? 'hour' : 'day'
 
-    const [requestTimeRange, setRequestTimeRange] = useState(defaultTimeRange)
-    const [tokenTimeRange, setTokenTimeRange] = useState(defaultTimeRange)
+    // Unified usage trend controls (replaces separate requestTimeRange, tokenTimeRange, modelSort)
+    const [usageTrendMetric, setUsageTrendMetric] = useState('requests')
+    const [usageTrendView, setUsageTrendView] = useState('byModel')
+    const [usageTrendTime, setUsageTrendTime] = useState(defaultTimeRange)
+
+    // Cost analysis view toggle
+    const [costView, setCostView] = useState('chart')
+
     const [chartAnimated, setChartAnimated] = useState(false)
     const [tableSort, setTableSort] = useState({ column: 'estimated_cost_usd', direction: 'desc' })
-    const [endpointSort, setEndpointSort] = useState('requests') // 'requests' or 'cost'
-    const [modelSort, setModelSort] = useState('requests') // 'requests' or 'cost'
+    const [endpointSort, setEndpointSort] = useState('requests')
     const [drilldownData, setDrilldownData] = useState(null)
     const [isDarkMode, setIsDarkMode] = useState(() => {
         if (typeof window !== 'undefined') {
@@ -186,8 +198,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
     // Auto-switch time range when dateRange changes
     useEffect(() => {
         const newTimeRange = (dateRange === 'today' || dateRange === 'yesterday') ? 'hour' : 'day'
-        setRequestTimeRange(newTimeRange)
-        setTokenTimeRange(newTimeRange)
+        setUsageTrendTime(newTimeRange)
     }, [dateRange])
 
     useEffect(() => {
@@ -195,12 +206,12 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return () => clearTimeout(timer)
     }, [])
 
-    // Re-trigger animation when switching chart tabs
+    // Re-trigger chart animation when switching views
     useEffect(() => {
         setChartAnimated(false)
         const timer = setTimeout(() => setChartAnimated(true), 50)
         return () => clearTimeout(timer)
-    }, [requestTimeRange, tokenTimeRange])
+    }, [usageTrendTime, usageTrendMetric, usageTrendView, costView])
 
     const toggleTheme = () => {
         setIsDarkMode(prev => {
@@ -221,11 +232,8 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
     const failureCount = filteredDailyStats.reduce((sum, d) => sum + (d.failure_count || 0), 0)
 
     // Use sum of model usage for total cost to ensure consistency with breakdown table
-    // Fallback to daily stats sum if model usage is empty (e.g. legacy data)
     const totalCostFromBreakdown = filteredModelUsage.reduce((sum, m) => sum + (m.estimated_cost_usd || 0), 0)
     const totalCostFromDaily = filteredDailyStats.reduce((sum, d) => sum + (parseFloat(d.estimated_cost_usd) || 0), 0)
-
-    // Prefer breakdown sum if available and significant, otherwise use daily stats
     const totalCost = (filteredModelUsage.length > 0) ? totalCostFromBreakdown : totalCostFromDaily
 
     const daysCount = Math.max(1, filteredDailyStats.length || 1)
@@ -240,8 +248,14 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
 
     const formatCost = (cost) => '$' + cost.toFixed(2)
 
-    // Hourly data - now comes from App.jsx with accurate delta calculations
+    // Hourly data - with computed cost field
     const hourlyData = hourlyStats || []
+    const hourlyChartData = useMemo(() => {
+        return hourlyData.map(h => ({
+            ...h,
+            cost: Object.values(h.models || {}).reduce((sum, m) => sum + (m.cost || 0), 0)
+        }))
+    }, [hourlyData])
 
     // Daily data
     const dailyChartData = useMemo(() => {
@@ -250,7 +264,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             requests: d.total_requests,
             tokens: d.total_tokens,
             cost: parseFloat(d.estimated_cost_usd) || 0,
-            models: d.models || {} // Pass through breakdown
+            models: d.models || {}
         }))
     }, [filteredDailyStats])
 
@@ -269,32 +283,31 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             .map(m => m.model_name)
     }, [filteredModelUsage])
 
-    // Get active top models based on sort dimension
+    // Get active top models based on selected metric
     const activeTopModels = useMemo(() => {
-        if (modelSort === 'cost') {
+        if (usageTrendMetric === 'cost') {
             return [...filteredModelUsage]
                 .sort((a, b) => (b.estimated_cost_usd || 0) - (a.estimated_cost_usd || 0))
                 .slice(0, 5)
                 .map(m => m.model_name)
         }
-        if (modelSort === 'tokens') return topTokenModels
+        if (usageTrendMetric === 'tokens') return topTokenModels
         return topRequestModels
-    }, [filteredModelUsage, modelSort, topRequestModels, topTokenModels])
+    }, [filteredModelUsage, usageTrendMetric, topRequestModels, topTokenModels])
 
-    // Prepare data for Stacked Area Chart (Model Trends)
+    // Prepare data for Stacked Area Chart (By Model view)
     const modelTrendData = useMemo(() => {
-        const sourceData = (requestTimeRange === 'hour' ? hourlyData : dailyChartData)
+        const sourceData = usageTrendTime === 'hour' ? hourlyChartData : dailyChartData
 
         return sourceData.map(point => {
             const newPoint = { time: point.time }
-            // Flatten models
             activeTopModels.forEach(modelName => {
                 const modelData = point.models?.[modelName]
                 let val = 0
 
                 if (modelData) {
-                    if (modelSort === 'cost') val = modelData.cost || modelData.estimated_cost_usd || 0
-                    else if (modelSort === 'tokens') val = modelData.tokens || modelData.total_tokens || 0
+                    if (usageTrendMetric === 'cost') val = modelData.cost || modelData.estimated_cost_usd || 0
+                    else if (usageTrendMetric === 'tokens') val = modelData.tokens || modelData.total_tokens || 0
                     else val = modelData.requests || modelData.request_count || 0
                 }
 
@@ -302,30 +315,22 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             })
             return newPoint
         })
-    }, [hourlyData, dailyChartData, requestTimeRange, activeTopModels, modelSort])
+    }, [hourlyChartData, dailyChartData, usageTrendTime, activeTopModels, usageTrendMetric])
 
-    // Model distribution - uses filtered model usage data
-    const stackedModelData = useMemo(() => {
-        if (!filteredModelUsage.length) return []
-
-        const modelCounts = {}
-        for (const model of filteredModelUsage) {
-            const name = model.model_name
-            if (!modelCounts[name]) {
-                modelCounts[name] = { requests: 0, tokens: 0, cost: 0 }
-            }
-            modelCounts[name].requests += model.request_count || 0
-            modelCounts[name].tokens += model.total_tokens || 0
-            modelCounts[name].cost += model.estimated_cost_usd || 0
-        }
-
-        const data = Object.entries(modelCounts)
-            .map(([name, values]) => ({ model: name, ...values }))
-        if (modelSort === 'cost') {
-            return data.sort((a, b) => (b.cost || 0) - (a.cost || 0))
-        }
-        return data.sort((a, b) => b.requests - a.requests)
-    }, [filteredModelUsage, modelSort])
+    // Token Type Breakdown data - input vs output per model
+    const tokenTypeData = useMemo(() => {
+        return (filteredModelUsage || [])
+            .filter(m => (m.input_tokens > 0 || m.output_tokens > 0))
+            .sort((a, b) => (b.total_tokens || 0) - (a.total_tokens || 0))
+            .slice(0, 10)
+            .map(m => ({
+                model: m.model_name?.split('-').slice(-2).join('-') || m.model_name,
+                fullName: m.model_name,
+                input_tokens: m.input_tokens || 0,
+                output_tokens: m.output_tokens || 0,
+                total_tokens: m.total_tokens || 0,
+            }))
+    }, [filteredModelUsage])
 
     // API Endpoint usage - uses granular endpointUsage passed from App.jsx
     const endpointUsage = useMemo(() => {
@@ -343,7 +348,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                     requests: m.request_count || 0,
                     tokens: m.total_tokens || 0,
                     cost: m.estimated_cost_usd || 0,
-                    ...m // Include other props like model_name
+                    ...m
                 }
             })
 
@@ -353,7 +358,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return normalized.sort((a, b) => (b.requests || 0) - (a.requests || 0))
     }, [rawEndpointUsage, endpointSort])
 
-    const sparklineData = hourlyData.slice(-12)
+    const sparklineData = hourlyChartData.slice(-12)
     const costSparkline = dailyChartData.length >= 2 ? dailyChartData : [...Array(7)].map((_, i) => ({ cost: i === 6 ? totalCost : totalCost * (i * 0.1) }))
 
     // Cost breakdown with sorting
@@ -361,15 +366,13 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         const data = (filteredModelUsage || []).map((m) => ({
             ...m,
             percentage: totalCost > 0 ? ((m.estimated_cost_usd || 0) / totalCost * 100).toFixed(0) : '0',
-            color: getModelColor(m.model_name)  // Use consistent color based on model name
+            color: getModelColor(m.model_name)
         }))
 
-        // Sort based on tableSort
         return data.sort((a, b) => {
             let aVal = a[tableSort.column]
             let bVal = b[tableSort.column]
 
-            // Handle string vs number
             if (typeof aVal === 'string') {
                 aVal = aVal.toLowerCase()
                 bVal = bVal.toLowerCase()
@@ -394,6 +397,9 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         if (tableSort.column !== column) return <span className="sort-icon">↕</span>
         return <span className="sort-icon active">{tableSort.direction === 'asc' ? '↑' : '↓'}</span>
     }
+
+    // Current trend visual config
+    const currentTrend = TREND_CONFIG[usageTrendMetric]
 
     // Loading state
     if (loading) {
@@ -448,12 +454,12 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                 </div>
             </header>
 
-            {/* Stats Cards */}
+            {/* Stats Cards - 3 consolidated cards */}
             <div className="stats-grid">
                 <StatCard
                     label="TOTAL REQUESTS"
                     value={formatNumber(totalRequests)}
-                    meta={`<span class="success">Success: ${successCount}</span> · <span class="failure">Failed: ${failureCount}</span>`}
+                    meta={`<span class="success">${formatNumber(successCount)} success</span> · <span class="failure">${formatNumber(failureCount)} failed</span> · RPM ${rpm}`}
                     icon={<BarGraph />}
                     sparklineData={sparklineData}
                     dataKey="requests"
@@ -469,24 +475,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                     stroke="#f59e0b"
                 />
                 <StatCard
-                    label="RPM"
-                    value={rpm}
-                    meta={`Requests: ${totalRequests}`}
-                    icon={<Zap />}
-                    sparklineData={sparklineData}
-                    dataKey="requests"
-                    stroke="#10b981"
-                />
-                <StatCard
-                    label="TPM"
-                    value={formatNumber(tpm)}
-                    meta={`Tokens: ${formatNumber(totalTokens)}`}
-                    icon={<Clock />}
-                    sparklineData={sparklineData}
-                    dataKey="tokens"
-                    stroke="#8b5cf6"
-                />
-                <StatCard
                     label="TOTAL COST"
                     value={<span className="cost-value">{formatCost(totalCost)}</span>}
                     meta="Estimated"
@@ -497,181 +485,257 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                 />
             </div>
 
-            {/* Charts Row 1 */}
-            <div className="charts-row">
-                <div className="chart-card chart-large">
-                    <div className="chart-header">
-                        <h3>Request Trends</h3>
-                        <div className="chart-tabs">
-                            <button className={`tab ${requestTimeRange === 'hour' ? 'active' : ''}`} onClick={() => setRequestTimeRange('hour')}>Hour</button>
-                            <button className={`tab ${requestTimeRange === 'day' ? 'active' : ''}`} onClick={() => setRequestTimeRange('day')}>Day</button>
-                        </div>
-                    </div>
-                    <div className="chart-body">
-                        <ResponsiveContainer width="100%" height={220}>
-                            <AreaChart data={requestTimeRange === 'hour' ? hourlyData : dailyChartData} onClick={(data) => {
-                                if (data?.activePayload?.[0]?.payload?.models) {
-                                    const point = data.activePayload[0].payload
-                                    setDrilldownData({ label: point.time, data: point, chartType: 'requests' })
-                                }
-                            }}>
-                                <defs>
-                                    <linearGradient id="requestGradient" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.3} />
-                                        <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <XAxis dataKey="time" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                                <YAxis stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                                <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} />
-                                <Area
-                                    type="monotone"
-                                    dataKey="requests"
-                                    name="Requests"
-                                    stroke="#3b82f6"
-                                    fill="url(#requestGradient)"
-                                    strokeWidth={2}
-                                    isAnimationActive={chartAnimated}
-                                    animationDuration={2000}
-                                />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
-
-                <div className="chart-card chart-small">
-                    <div className="chart-header">
-                        <h3>💰 Cost Breakdown</h3>
-                    </div>
-                    <div className="chart-body pie-container">
-                        {costBreakdown.length > 0 ? (
-                            <ResponsiveContainer width="100%" height={200}>
-                                <PieChart onClick={() => {
-                                    if (costBreakdown.length > 0) {
-                                        const models = {}
-                                        costBreakdown.forEach(m => {
-                                            models[m.model_name] = {
-                                                requests: m.request_count,
-                                                tokens: m.total_tokens,
-                                                cost: m.estimated_cost_usd
-                                            }
-                                        })
-                                        setDrilldownData({ label: 'All Models', data: { models }, chartType: 'cost', title: 'Cost Breakdown — All Models' })
-                                    }
-                                }}>
-                                    <Pie
-                                        data={costBreakdown}
-                                        dataKey="estimated_cost_usd"
-                                        nameKey="model_name"
-                                        cx="50%"
-                                        cy="50%"
-                                        outerRadius={70}
-                                        innerRadius={40}
-                                        label={({ percentage }) => `${percentage}%`}
-                                        labelLine={false}
-                                        isAnimationActive={chartAnimated}
-                                        animationDuration={1500}
-                                    >
-                                        {costBreakdown.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} forceCurrency={true} />} />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        ) : (
-                            <div className="empty-state">No cost data</div>
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            {/* Token Usage Trends */}
+            {/* ===== Usage Trends (By Model × Metric × Time | Token Types) ===== */}
             <div className="charts-row">
                 <div className="chart-card chart-full">
                     <div className="chart-header">
-                        <h3>Token Usage Trends</h3>
-                        <div className="chart-tabs">
-                            <button className={`tab ${tokenTimeRange === 'hour' ? 'active' : ''}`} onClick={() => setTokenTimeRange('hour')}>Hour</button>
-                            <button className={`tab ${tokenTimeRange === 'day' ? 'active' : ''}`} onClick={() => setTokenTimeRange('day')}>Day</button>
+                        <h3>Usage Trends</h3>
+                        <div className="chart-controls">
+                            {usageTrendView === 'byModel' && (
+                                <div className="chart-tabs">
+                                    <button className={`tab ${usageTrendMetric === 'requests' ? 'active' : ''}`} onClick={() => setUsageTrendMetric('requests')}>Requests</button>
+                                    <button className={`tab ${usageTrendMetric === 'tokens' ? 'active' : ''}`} onClick={() => setUsageTrendMetric('tokens')}>Tokens</button>
+                                    <button className={`tab ${usageTrendMetric === 'cost' ? 'active' : ''}`} onClick={() => setUsageTrendMetric('cost')}>Cost</button>
+                                </div>
+                            )}
+                            <div className="chart-tabs">
+                                <button className={`tab ${usageTrendView === 'byModel' ? 'active' : ''}`} onClick={() => setUsageTrendView('byModel')}>By Model</button>
+                                <button className={`tab ${usageTrendView === 'tokenTypes' ? 'active' : ''}`} onClick={() => setUsageTrendView('tokenTypes')}>Token Types</button>
+                            </div>
+                            {usageTrendView === 'byModel' && (
+                                <div className="chart-tabs">
+                                    <button className={`tab ${usageTrendTime === 'hour' ? 'active' : ''}`} onClick={() => setUsageTrendTime('hour')}>Hour</button>
+                                    <button className={`tab ${usageTrendTime === 'day' ? 'active' : ''}`} onClick={() => setUsageTrendTime('day')}>Day</button>
+                                </div>
+                            )}
                         </div>
                     </div>
                     <div className="chart-body">
-                        <ResponsiveContainer width="100%" height={200}>
-                            <AreaChart data={tokenTimeRange === 'hour' ? hourlyData : dailyChartData} onClick={(data) => {
-                                if (data?.activePayload?.[0]?.payload?.models) {
-                                    const point = data.activePayload[0].payload
-                                    setDrilldownData({ label: point.time, data: point, chartType: 'tokens' })
-                                }
-                            }}>
-                                <defs>
-                                    <linearGradient id="tokenGradient" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="#10b981" stopOpacity={0.4} />
-                                        <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <XAxis dataKey="time" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                                <YAxis stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={formatNumber} />
-                                <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} />
-                                <Area
-                                    type="monotone"
-                                    dataKey="tokens"
-                                    name="Tokens"
-                                    stroke="#10b981"
-                                    fill="url(#tokenGradient)"
-                                    strokeWidth={2}
-                                    isAnimationActive={chartAnimated}
-                                    animationDuration={2000}
-                                />
-                            </AreaChart>
-                        </ResponsiveContainer>
+                        {usageTrendView === 'byModel' ? (
+                            <ResponsiveContainer width="100%" height={280}>
+                                {modelTrendData.length > 0 ? (
+                                    <AreaChart data={modelTrendData}>
+                                        <XAxis dataKey="time" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                                        <YAxis stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 12 }} axisLine={false} tickLine={false}
+                                            tickFormatter={usageTrendMetric === 'cost' ? (v) => `$${v}` : formatNumber} />
+                                        <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} forceCurrency={usageTrendMetric === 'cost'} />} />
+                                        {activeTopModels.map((modelName) => (
+                                            <Area
+                                                key={modelName}
+                                                type="monotone"
+                                                dataKey={modelName}
+                                                stackId="1"
+                                                stroke={getModelColor(modelName)}
+                                                fill={getModelColor(modelName)}
+                                                fillOpacity={0.6}
+                                                strokeWidth={1}
+                                                isAnimationActive={chartAnimated}
+                                                animationDuration={1500}
+                                            />
+                                        ))}
+                                    </AreaChart>
+                                ) : (
+                                    <AreaChart data={[]}>
+                                        <text x="50%" y="50%" textAnchor="middle" fill={isDarkMode ? '#64748B' : '#94A3B8'} fontSize={13}>No model data</text>
+                                    </AreaChart>
+                                )}
+                            </ResponsiveContainer>
+                        ) : (
+                            /* Token Types: Input vs Output per model */
+                            tokenTypeData.length > 0 ? (
+                                <ResponsiveContainer width="100%" height={Math.max(280, tokenTypeData.length * 40)}>
+                                    <BarChart data={tokenTypeData} layout="vertical" margin={{ left: 10, right: 30 }}>
+                                        <XAxis type="number" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={formatNumber} />
+                                        <YAxis type="category" dataKey="model" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 11 }} width={120} axisLine={false} tickLine={false} interval={0} />
+                                        <Tooltip
+                                            content={({ active, payload }) => {
+                                                if (!active || !payload?.length) return null
+                                                const d = payload[0]?.payload
+                                                return (
+                                                    <div style={{
+                                                        background: isDarkMode ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.98)',
+                                                        border: `1px solid ${isDarkMode ? 'rgba(245,158,11,0.3)' : 'rgba(245,158,11,0.4)'}`,
+                                                        borderRadius: 10, padding: '10px 14px',
+                                                        boxShadow: isDarkMode ? '0 8px 24px rgba(0,0,0,0.4)' : '0 8px 24px rgba(0,0,0,0.1)',
+                                                    }}>
+                                                        <div style={{ fontWeight: 600, color: isDarkMode ? '#F8FAFC' : '#0F172A', marginBottom: 6, fontFamily: 'Space Grotesk' }}>{d?.fullName}</div>
+                                                        <div style={{ fontSize: 12, color: isDarkMode ? '#94A3B8' : '#475569' }}>
+                                                            <div><span style={{ color: '#3b82f6' }}>Input:</span> <strong style={{ color: isDarkMode ? '#F8FAFC' : '#0F172A' }}>{formatNumber(d?.input_tokens)}</strong></div>
+                                                            <div><span style={{ color: '#f59e0b' }}>Output:</span> <strong style={{ color: isDarkMode ? '#F8FAFC' : '#0F172A' }}>{formatNumber(d?.output_tokens)}</strong></div>
+                                                            <div style={{ borderTop: '1px solid rgba(148,163,184,0.2)', marginTop: 4, paddingTop: 4 }}>
+                                                                Ratio: <strong style={{ color: isDarkMode ? '#F8FAFC' : '#0F172A' }}>{d?.input_tokens > 0 ? (d.output_tokens / d.input_tokens).toFixed(1) : '—'}x</strong> output/input
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )
+                                            }}
+                                            cursor={false}
+                                        />
+                                        <Legend
+                                            verticalAlign="top"
+                                            height={30}
+                                            formatter={(value) => <span style={{ color: isDarkMode ? '#94A3B8' : '#475569', fontSize: 12 }}>{value}</span>}
+                                        />
+                                        <Bar dataKey="input_tokens" name="Input Tokens" fill="#3b82f6" stackId="1" radius={[0, 0, 0, 0]}
+                                            isAnimationActive={chartAnimated} animationDuration={1500} />
+                                        <Bar dataKey="output_tokens" name="Output Tokens" fill="#f59e0b" stackId="1" radius={[0, 4, 4, 0]}
+                                            isAnimationActive={chartAnimated} animationDuration={1500} />
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <div className="empty-state" style={{ minHeight: 280, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    No token type breakdown data available
+                                </div>
+                            )
+                        )}
                     </div>
                 </div>
             </div>
 
-            {/* Model Usage & API Endpoints */}
+            {/* ===== Cost Analysis (unified: Pie Chart + Details Table) ===== */}
             <div className="charts-row">
-                <div className="chart-card chart-half">
+                <div className="chart-card chart-full">
                     <div className="chart-header">
-                        <h3>📊 Model Usage (Top 5 Trends)</h3>
+                        <h3>Cost Analysis</h3>
                         <div className="chart-tabs">
-                            <button className={`tab ${modelSort === 'requests' ? 'active' : ''}`} onClick={() => setModelSort('requests')}>Reqs</button>
-                            <button className={`tab ${modelSort === 'tokens' ? 'active' : ''}`} onClick={() => setModelSort('tokens')}>Toks</button>
-                            <button className={`tab ${modelSort === 'cost' ? 'active' : ''}`} onClick={() => setModelSort('cost')}>Cost</button>
+                            <button className={`tab ${costView === 'chart' ? 'active' : ''}`} onClick={() => setCostView('chart')}>Chart</button>
+                            <button className={`tab ${costView === 'details' ? 'active' : ''}`} onClick={() => setCostView('details')}>Details</button>
                         </div>
                     </div>
-                    <div className="chart-body">
-                        {modelTrendData.length > 0 ? (
-                            <ResponsiveContainer width="100%" height={220}>
-                                <AreaChart data={modelTrendData}>
-                                    <XAxis dataKey="time" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                                    <YAxis stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={modelSort === 'cost' ? (val) => `$${val}` : formatNumber} />
-                                    <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} forceCurrency={modelSort === 'cost'} />} />
-                                    {activeTopModels.map((modelName, index) => (
-                                        <Area
-                                            key={modelName}
-                                            type="monotone"
-                                            dataKey={modelName}
-                                            stackId="1"
-                                            stroke={getModelColor(modelName)}
-                                            fill={getModelColor(modelName)}
-                                            fillOpacity={0.6}
-                                            strokeWidth={1}
+                    {costView === 'chart' ? (
+                        <div className="chart-body pie-container" style={{ minHeight: 300 }}>
+                            {costBreakdown.length > 0 ? (
+                                <ResponsiveContainer width="100%" height={300}>
+                                    <PieChart onClick={() => {
+                                        if (costBreakdown.length > 0) {
+                                            const models = {}
+                                            costBreakdown.forEach(m => {
+                                                models[m.model_name] = {
+                                                    requests: m.request_count,
+                                                    tokens: m.total_tokens,
+                                                    cost: m.estimated_cost_usd
+                                                }
+                                            })
+                                            setDrilldownData({ label: 'All Models', data: { models }, chartType: 'cost', title: 'Cost Breakdown — All Models' })
+                                        }
+                                    }}>
+                                        <Pie
+                                            data={costBreakdown}
+                                            dataKey="estimated_cost_usd"
+                                            nameKey="model_name"
+                                            cx="50%"
+                                            cy="50%"
+                                            outerRadius={100}
+                                            innerRadius={60}
+                                            label={({ model_name, percentage }) => `${model_name?.split('-').slice(-2).join('-') || ''} ${percentage}%`}
+                                            labelLine={true}
                                             isAnimationActive={chartAnimated}
                                             animationDuration={1500}
-                                        />
-                                    ))}
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        ) : (
-                            <div className="empty-state">No model data</div>
-                        )}
-                    </div>
+                                        >
+                                            {costBreakdown.map((entry, index) => (
+                                                <Cell key={`cell-${index}`} fill={entry.color} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} forceCurrency={true} />} />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            ) : (
+                                <div className="empty-state">No cost data</div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="table-wrapper">
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th onClick={() => handleSort('model_name')} className="sortable">
+                                            Model <SortIcon column="model_name" />
+                                        </th>
+                                        <th onClick={() => handleSort('request_count')} className="sortable">
+                                            Requests <SortIcon column="request_count" />
+                                        </th>
+                                        <th onClick={() => handleSort('input_tokens')} className="sortable">
+                                            Input Tokens <SortIcon column="input_tokens" />
+                                        </th>
+                                        <th onClick={() => handleSort('output_tokens')} className="sortable">
+                                            Output Tokens <SortIcon column="output_tokens" />
+                                        </th>
+                                        <th onClick={() => handleSort('total_tokens')} className="sortable">
+                                            Total Tokens <SortIcon column="total_tokens" />
+                                        </th>
+                                        <th onClick={() => handleSort('estimated_cost_usd')} className="sortable">
+                                            Cost <SortIcon column="estimated_cost_usd" />
+                                        </th>
+                                        <th onClick={() => handleSort('percentage')} className="sortable">
+                                            % <SortIcon column="percentage" />
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {costBreakdown.length > 0 ? costBreakdown.map((m, i) => (
+                                        <tr key={i} className="clickable-row" onClick={() => {
+                                            const apiKeyRows = endpointUsage
+                                                .filter(ep => ep.models?.[m.model_name])
+                                                .map(ep => {
+                                                    const md = ep.models[m.model_name]
+                                                    return {
+                                                        _key: ep.endpoint,
+                                                        apiKey: ep.endpoint,
+                                                        requests: md.requests || md.request_count || 0,
+                                                        tokens: md.tokens || md.total_tokens || 0,
+                                                        cost: md.cost || md.estimated_cost_usd || 0,
+                                                    }
+                                                })
+                                                .sort((a, b) => b.requests - a.requests)
+                                            setDrilldownData({
+                                                label: m.model_name,
+                                                title: `${m.model_name} — Per API Key`,
+                                                chartType: 'modelApiKeys',
+                                                columns: [
+                                                    { key: 'apiKey', label: 'API Key' },
+                                                    { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
+                                                    { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
+                                                    { key: 'cost', label: 'Cost', render: v => `$${v.toFixed(4)}` },
+                                                ],
+                                                rows: apiKeyRows,
+                                            })
+                                        }}>
+                                            <td><span className="color-dot" style={{ background: m.color }}></span>{m.model_name}</td>
+                                            <td>{formatNumber(m.request_count)}</td>
+                                            <td>{formatNumber(m.input_tokens)}</td>
+                                            <td>{formatNumber(m.output_tokens)}</td>
+                                            <td>{formatNumber(m.total_tokens)}</td>
+                                            <td className="cost">{formatCost(m.estimated_cost_usd || 0)}</td>
+                                            <td>{m.percentage}%</td>
+                                        </tr>
+                                    )) : (
+                                        <tr><td colSpan="7" className="empty">No data</td></tr>
+                                    )}
+                                </tbody>
+                                {costBreakdown.length > 0 && (
+                                    <tfoot>
+                                        <tr>
+                                            <td><strong>Total</strong></td>
+                                            <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.request_count, 0))}</strong></td>
+                                            <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.input_tokens, 0))}</strong></td>
+                                            <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.output_tokens, 0))}</strong></td>
+                                            <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.total_tokens, 0))}</strong></td>
+                                            <td className="cost"><strong>{formatCost(totalCost)}</strong></td>
+                                            <td><strong>100%</strong></td>
+                                        </tr>
+                                    </tfoot>
+                                )}
+                            </table>
+                        </div>
+                    )}
                 </div>
+            </div>
 
-                <div className="chart-card chart-half">
+            {/* ===== API Keys ===== */}
+            <div className="charts-row">
+                <div className="chart-card chart-full">
                     <div className="chart-header">
-                        <h3>🔑 API Keys ({endpointUsage.length})</h3>
+                        <h3>API Keys ({endpointUsage.length})</h3>
                         <div className="chart-tabs">
                             <button className={`tab ${endpointSort === 'requests' ? 'active' : ''}`} onClick={() => setEndpointSort('requests')}>Requests</button>
                             <button className={`tab ${endpointSort === 'cost' ? 'active' : ''}`} onClick={() => setEndpointSort('cost')}>Cost</button>
@@ -714,97 +778,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                             <div className="empty-state">No endpoint data</div>
                         )}
                     </div>
-                </div>
-            </div>
-
-            {/* Cost Details Table */}
-            <div className="chart-card">
-                <div className="chart-header">
-                    <h3>💵 Cost Details by Model</h3>
-                </div>
-                <div className="table-wrapper">
-                    <table className="data-table">
-                        <thead>
-                            <tr>
-                                <th onClick={() => handleSort('model_name')} className="sortable">
-                                    Model <SortIcon column="model_name" />
-                                </th>
-                                <th onClick={() => handleSort('request_count')} className="sortable">
-                                    Requests <SortIcon column="request_count" />
-                                </th>
-                                <th onClick={() => handleSort('input_tokens')} className="sortable">
-                                    Input Tokens <SortIcon column="input_tokens" />
-                                </th>
-                                <th onClick={() => handleSort('output_tokens')} className="sortable">
-                                    Output Tokens <SortIcon column="output_tokens" />
-                                </th>
-                                <th onClick={() => handleSort('total_tokens')} className="sortable">
-                                    Total Tokens <SortIcon column="total_tokens" />
-                                </th>
-                                <th onClick={() => handleSort('estimated_cost_usd')} className="sortable">
-                                    Cost <SortIcon column="estimated_cost_usd" />
-                                </th>
-                                <th onClick={() => handleSort('percentage')} className="sortable">
-                                    % <SortIcon column="percentage" />
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {costBreakdown.length > 0 ? costBreakdown.map((m, i) => (
-                                <tr key={i} className="clickable-row" onClick={() => {
-                                    // Find this model's usage per API key
-                                    const apiKeyRows = endpointUsage
-                                        .filter(ep => ep.models?.[m.model_name])
-                                        .map(ep => {
-                                            const md = ep.models[m.model_name]
-                                            return {
-                                                _key: ep.endpoint,
-                                                apiKey: ep.endpoint,
-                                                requests: md.requests || md.request_count || 0,
-                                                tokens: md.tokens || md.total_tokens || 0,
-                                                cost: md.cost || md.estimated_cost_usd || 0,
-                                            }
-                                        })
-                                        .sort((a, b) => b.requests - a.requests)
-                                    setDrilldownData({
-                                        label: m.model_name,
-                                        title: `${m.model_name} — Per API Key`,
-                                        chartType: 'modelApiKeys',
-                                        columns: [
-                                            { key: 'apiKey', label: 'API Key' },
-                                            { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
-                                            { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
-                                            { key: 'cost', label: 'Cost', render: v => `$${v.toFixed(4)}` },
-                                        ],
-                                        rows: apiKeyRows,
-                                    })
-                                }}>
-                                    <td><span className="color-dot" style={{ background: m.color }}></span>{m.model_name}</td>
-                                    <td>{formatNumber(m.request_count)}</td>
-                                    <td>{formatNumber(m.input_tokens)}</td>
-                                    <td>{formatNumber(m.output_tokens)}</td>
-                                    <td>{formatNumber(m.total_tokens)}</td>
-                                    <td className="cost">{formatCost(m.estimated_cost_usd || 0)}</td>
-                                    <td>{m.percentage}%</td>
-                                </tr>
-                            )) : (
-                                <tr><td colSpan="7" className="empty">No data</td></tr>
-                            )}
-                        </tbody>
-                        {costBreakdown.length > 0 && (
-                            <tfoot>
-                                <tr>
-                                    <td><strong>Total</strong></td>
-                                    <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.request_count, 0))}</strong></td>
-                                    <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.input_tokens, 0))}</strong></td>
-                                    <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.output_tokens, 0))}</strong></td>
-                                    <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.total_tokens, 0))}</strong></td>
-                                    <td className="cost"><strong>{formatCost(totalCost)}</strong></td>
-                                    <td><strong>100%</strong></td>
-                                </tr>
-                            </tfoot>
-                        )}
-                    </table>
                 </div>
             </div>
 
