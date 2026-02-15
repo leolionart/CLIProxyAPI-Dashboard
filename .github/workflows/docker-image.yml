@@ -16,12 +16,34 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Determine next version
+      if: github.event_name == 'push'
+      id: version
+      run: |
+        LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
+        if [ -z "$LATEST" ]; then
+          NEW_VERSION="1.0.0"
+        else
+          VERSION=${LATEST#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        fi
+        echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "Next version: v$NEW_VERSION"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
     - name: Log in to GitHub Container Registry
       uses: docker/login-action@v3
@@ -38,6 +60,7 @@ jobs:
         tags: |
           type=raw,value=latest,enable={{is_default_branch}}
           type=sha,prefix=
+          type=raw,value=${{ steps.version.outputs.version }},enable=${{ github.event_name == 'push' }}
 
     - name: Extract metadata for Frontend
       id: meta-frontend
@@ -47,6 +70,7 @@ jobs:
         tags: |
           type=raw,value=latest,enable={{is_default_branch}}
           type=sha,prefix=
+          type=raw,value=${{ steps.version.outputs.version }},enable=${{ github.event_name == 'push' }}
 
     - name: Build and push Collector image
       uses: docker/build-push-action@v6
@@ -56,6 +80,8 @@ jobs:
         push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta-collector.outputs.tags }}
         labels: ${{ steps.meta-collector.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
     - name: Build and push Frontend image
       uses: docker/build-push-action@v6
@@ -68,3 +94,20 @@ jobs:
         build-args: |
           VITE_SUPABASE_URL=https://placeholder.supabase.co
           VITE_SUPABASE_PUBLISHABLE_KEY=placeholder
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Create GitHub Release
+      if: github.event_name == 'push'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: Release ${{ steps.version.outputs.tag }}
+        generate_release_notes: true
+        body: |
+          ## Docker Images
+
+          ```
+          docker pull ghcr.io/${{ github.repository_owner }}/cliproxy-collector:${{ steps.version.outputs.version }}
+          docker pull ghcr.io/${{ github.repository_owner }}/cliproxy-dashboard:${{ steps.version.outputs.version }}
+          ```

@@ -24,7 +24,7 @@ services:
     networks:
       - cliproxy-network
     labels:
-      - "com.centurylinklabs.watchtower.enable=false"
+      - "com.centurylinklabs.watchtower.enable=true"
     logging:
       driver: "json-file"
       options:
@@ -43,7 +43,7 @@ services:
     networks:
       - cliproxy-network
     labels:
-      - "com.centurylinklabs.watchtower.enable=false"
+      - "com.centurylinklabs.watchtower.enable=true"
     logging:
       driver: "json-file"
       options:
