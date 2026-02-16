@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import {
-    AreaChart, Area, ComposedChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+    AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
     XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import { BarGraph, PieGraph, DollarSign, Moon, Sun, Refresh } from './Icons'
@@ -518,31 +518,27 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                         {usageTrendView === 'models' ? (
                             <ResponsiveContainer width="100%" height={320}>
                                 {modelTrendData.length > 0 ? (
-                                    <ComposedChart data={modelTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                    <AreaChart data={modelTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                                         <defs>
-                                            <linearGradient id="gradCostOverlay" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.15} />
-                                                <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
-                                            </linearGradient>
+                                            {activeTopModels.map((modelName) => {
+                                                const color = getModelColor(modelName)
+                                                const safeId = modelName.replace(/[^a-zA-Z0-9]/g, '_')
+                                                return (
+                                                    <linearGradient key={safeId} id={`gradModel_${safeId}`} x1="0" y1="0" x2="0" y2="1">
+                                                        <stop offset="0%" stopColor={color} stopOpacity={0.5} />
+                                                        <stop offset="100%" stopColor={color} stopOpacity={0.03} />
+                                                    </linearGradient>
+                                                )
+                                            })}
                                         </defs>
-                                        <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'} />
+                                        <CartesianGrid strokeDasharray="4 4" stroke={isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'} />
                                         <XAxis dataKey="time" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                                         <YAxis
-                                            yAxisId="left"
                                             stroke={isDarkMode ? '#6e7681' : '#57606a'}
                                             tick={{ fontSize: 11 }}
                                             axisLine={false}
                                             tickLine={false}
                                             tickFormatter={formatNumber}
-                                        />
-                                        <YAxis
-                                            yAxisId="right"
-                                            orientation="right"
-                                            stroke="#8b5cf6"
-                                            tick={{ fontSize: 11, fill: '#8b5cf6' }}
-                                            axisLine={false}
-                                            tickLine={false}
-                                            tickFormatter={(v) => `$${v}`}
                                         />
                                         <Tooltip
                                             content={({ active, payload, label }) => {
@@ -566,7 +562,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                                 <div style={{ fontWeight: 700, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk' }}>{formatNumber(point?._totalTokens || 0)}</div>
                                                             </div>
                                                             <div style={{ fontSize: 11 }}>
-                                                                <span style={{ color: '#8b5cf6' }}>Cost</span>
+                                                                <span style={{ color: '#f59e0b' }}>Cost</span>
                                                                 <div style={{ fontWeight: 700, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk' }}>${(point?._totalCost || 0).toFixed(2)}</div>
                                                             </div>
                                                             <div style={{ fontSize: 11 }}>
@@ -592,33 +588,25 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                             height={36}
                                             formatter={(value) => <span style={{ color: isDarkMode ? '#94A3B8' : '#475569', fontSize: 11 }}>{value}</span>}
                                         />
-                                        {activeTopModels.map((modelName) => (
-                                            <Line
-                                                key={modelName}
-                                                yAxisId="left"
-                                                type="monotone"
-                                                dataKey={modelName}
-                                                stroke={getModelColor(modelName)}
-                                                strokeWidth={2}
-                                                dot={false}
-                                                activeDot={{ r: 4, strokeWidth: 2 }}
-                                                isAnimationActive={chartAnimated}
-                                                animationDuration={1500}
-                                            />
-                                        ))}
-                                        <Area
-                                            yAxisId="right"
-                                            type="monotone"
-                                            dataKey="_totalCost"
-                                            name="Total Cost"
-                                            stroke="#8b5cf6"
-                                            strokeWidth={2}
-                                            strokeDasharray="6 3"
-                                            fill="url(#gradCostOverlay)"
-                                            isAnimationActive={chartAnimated}
-                                            animationDuration={1500}
-                                        />
-                                    </ComposedChart>
+                                        {activeTopModels.map((modelName) => {
+                                            const color = getModelColor(modelName)
+                                            const safeId = modelName.replace(/[^a-zA-Z0-9]/g, '_')
+                                            return (
+                                                <Area
+                                                    key={modelName}
+                                                    type="monotone"
+                                                    dataKey={modelName}
+                                                    stroke={color}
+                                                    fill={`url(#gradModel_${safeId})`}
+                                                    strokeWidth={2}
+                                                    dot={false}
+                                                    activeDot={{ r: 4, strokeWidth: 2 }}
+                                                    isAnimationActive={chartAnimated}
+                                                    animationDuration={1500}
+                                                />
+                                            )
+                                        })}
+                                    </AreaChart>
                                 ) : (
                                     <AreaChart data={[]}>
                                         <text x="50%" y="50%" textAnchor="middle" fill={isDarkMode ? '#64748B' : '#94A3B8'} fontSize={13}>No model data</text>

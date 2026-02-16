@@ -1792,14 +1792,14 @@ body {
   background: var(--color-bg-hover);
 }
 
-/* ===== Dual-axis overview chart dark background ===== */
+/* ===== Chart dark background — deeper for contrast ===== */
 .chart-body-dark {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.35);
   border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
 .dashboard.light .chart-body-dark {
-  background: rgba(0, 0, 0, 0.03);
+  background: rgba(0, 0, 0, 0.04);
 }
 
 /* ===== Improved Chart Card Hover ===== */
