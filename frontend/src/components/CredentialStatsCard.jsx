@@ -60,43 +60,10 @@ const ViewTabs = ({ activeView, onSwitch }) => (
   </div>
 )
 
-export default function CredentialStatsCard({ onRowClick }) {
-  const [data, setData] = useState(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [setupRequired, setSetupRequired] = useState(false)
+export default function CredentialStatsCard({ onRowClick, data, isLoading, setupRequired }) {
   const [activeView, setActiveView] = useState('credentials')
   const [sortConfig, setSortConfig] = useState({ key: 'total_requests', dir: 'desc' })
   const [expandedRow, setExpandedRow] = useState(null)
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setIsLoading(true)
-        const { data: rows, error } = await supabase
-          .from('credential_usage_summary')
-          .select('*')
-          .eq('id', 1)
-          .single()
-
-        if (error) {
-          if (error.code === 'PGRST205' || error.message?.includes('relation') || error.message?.includes('does not exist') || error.message?.includes('Could not find')) {
-            setSetupRequired(true)
-          }
-          throw error
-        }
-
-        setData(rows)
-      } catch (err) {
-        console.error('Error fetching credential stats:', err)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    fetchData()
-    const interval = setInterval(fetchData, 120_000)
-    return () => clearInterval(interval)
-  }, [])
 
   const credentials = data?.credentials || []
   const apiKeys = data?.api_keys || []
@@ -230,7 +197,7 @@ export default function CredentialStatsCard({ onRowClick }) {
       </div>
 
       {/* Table */}
-      <div className="table-wrapper">
+      <div className="table-wrapper cred-table-wrapper">
         {activeView === 'credentials' ? (
           <CredentialsTable
             items={sortedItems}

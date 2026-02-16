@@ -90,6 +90,37 @@ function App() {
     const [lastUpdated, setLastUpdated] = useState(null)
     const [dateRange, setDateRange] = useState('today') // 'today', 'yesterday', '7d', '30d', 'year', 'all'
 
+    // Credential stats state
+    const [credentialData, setCredentialData] = useState(null)
+    const [credentialLoading, setCredentialLoading] = useState(true)
+    const [credentialSetupRequired, setCredentialSetupRequired] = useState(false)
+
+    // Fetch credential stats (not affected by date range)
+    const fetchCredentialStats = useCallback(async () => {
+        try {
+            setCredentialLoading(true)
+            const { data: rows, error } = await supabase
+                .from('credential_usage_summary')
+                .select('*')
+                .eq('id', 1)
+                .single()
+
+            if (error) {
+                if (error.code === 'PGRST205' || error.message?.includes('relation') || error.message?.includes('does not exist') || error.message?.includes('Could not find')) {
+                    setCredentialSetupRequired(true)
+                }
+                throw error
+            }
+
+            setCredentialData(rows)
+            setCredentialSetupRequired(false)
+        } catch (err) {
+            console.error('Error fetching credential stats:', err)
+        } finally {
+            setCredentialLoading(false)
+        }
+    }, [])
+
     const fetchData = useCallback(async (rangeId = dateRange, isInitial = false) => {
         try {
             if (isInitial) {
@@ -610,19 +641,13 @@ function App() {
         }
     }, [dateRange])
 
+    // Initial load - fetch credential stats once
+    useEffect(() => {
+        fetchCredentialStats()
+    }, [fetchCredentialStats])
+
     // Refetch when dateRange changes
     useEffect(() => {
-        // This effect runs on initial mount and when dateRange changes.
-        // We want `loading` for the very first fetch, and `isRefreshing` for subsequent dateRange changes.
-        // A simple way to handle this is to call fetchData with `isInitial = true` on mount,
-        // and let the `dateRange` dependency trigger subsequent calls with `isInitial = false` (default).
-        // However, since `fetchData` is in the dependency array, it will be recreated if `dateRange` changes,
-        // and this effect will re-run.
-        // To ensure `isInitial` is true only once, we can use a ref or a separate useEffect for initial load.
-        // Given the instruction, we'll assume `loading` is set to true initially and then `isRefreshing` takes over.
-
-        // On initial mount, `loading` is already true.
-        // For subsequent calls (e.g., dateRange change), `isInitial` will be false by default.
         fetchData(dateRange)
     }, [dateRange, fetchData])
 
@@ -638,14 +663,17 @@ function App() {
             )
             .subscribe()
 
-        // Refresh every 5 minutes
-        const interval = setInterval(() => fetchData(dateRange), 5 * 60 * 1000)
+        // Refresh every 5 minutes - also refresh credential stats
+        const interval = setInterval(() => {
+            fetchData(dateRange)
+            fetchCredentialStats()
+        }, 5 * 60 * 1000)
 
         return () => {
             supabase.removeChannel(channel)
             clearInterval(interval)
         }
-    }, [dateRange, fetchData])
+    }, [dateRange, fetchData, fetchCredentialStats])
 
     // Trigger collector to fetch fresh data from CLIProxy
     const triggerCollector = async () => {
@@ -718,6 +746,9 @@ function App() {
                 dateRange={dateRange}
                 onDateRangeChange={handleDateRangeChange}
                 endpointUsage={endpointUsage}
+                credentialData={credentialData}
+                credentialLoading={credentialLoading}
+                credentialSetupRequired={credentialSetupRequired}
             />
         </div>
     )

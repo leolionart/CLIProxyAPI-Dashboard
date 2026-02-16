@@ -170,7 +170,7 @@ const TREND_CONFIG = {
     cost: { stroke: '#f59e0b', name: 'Cost' },
 }
 
-function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefreshing, lastUpdated, dateRange, onDateRangeChange, endpointUsage: rawEndpointUsage }) {
+function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefreshing, lastUpdated, dateRange, onDateRangeChange, endpointUsage: rawEndpointUsage, credentialData, credentialLoading, credentialSetupRequired }) {
     // Auto-select time range based on dateRange: hour for today/yesterday, day for longer ranges
     const defaultTimeRange = (dateRange === 'today' || dateRange === 'yesterday') ? 'hour' : 'day'
 
@@ -878,7 +878,12 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
 
             {/* Credential Stats - Usage rates and limits per credential */}
             <div className="charts-row">
-                <CredentialStatsCard isDarkMode={isDarkMode} onRowClick={(item, type) => {
+                <CredentialStatsCard
+                    isDarkMode={isDarkMode}
+                    data={credentialData}
+                    isLoading={credentialLoading}
+                    setupRequired={credentialSetupRequired}
+                    onRowClick={(item, type) => {
                     if (!item?.models || Object.keys(item.models).length === 0) return
                     const label = type === 'api_key' ? item.api_key_name : (item.email || item.source || 'Unknown')
                     const modelRows = Object.entries(item.models)
