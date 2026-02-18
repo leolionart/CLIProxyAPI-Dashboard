@@ -771,6 +771,28 @@ body {
   background: var(--color-primary);
 }
 
+/* Subtle scrollbar for legend panels */
+.chart-legend-panel {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.chart-legend-panel:hover {
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+.chart-legend-panel::-webkit-scrollbar {
+  width: 4px;
+}
+.chart-legend-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chart-legend-panel::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+}
+.chart-legend-panel:hover::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+}
+
 /* ===== Selection ===== */
 ::selection {
   background: var(--color-primary);

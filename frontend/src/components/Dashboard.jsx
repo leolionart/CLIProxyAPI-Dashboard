@@ -403,6 +403,35 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return <span className="sort-icon active">{tableSort.direction === 'asc' ? '↑' : '↓'}</span>
     }
 
+    // Drilldown: show per-API-key breakdown for a given model
+    const openModelDrilldown = (modelName) => {
+        const apiKeyRows = endpointUsage
+            .filter(ep => ep.models?.[modelName])
+            .map(ep => {
+                const md = ep.models[modelName]
+                return {
+                    _key: ep.endpoint,
+                    apiKey: ep.endpoint,
+                    requests: md.requests || md.request_count || 0,
+                    tokens: md.tokens || md.total_tokens || 0,
+                    cost: md.cost || md.estimated_cost_usd || 0,
+                }
+            })
+            .sort((a, b) => b.requests - a.requests)
+        setDrilldownData({
+            label: modelName,
+            title: `${modelName} — Per API Key`,
+            chartType: 'modelApiKeys',
+            columns: [
+                { key: 'apiKey', label: 'API Key' },
+                { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
+                { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
+                { key: 'cost', label: 'Cost', render: v => `$${v.toFixed(4)}` },
+            ],
+            rows: apiKeyRows,
+        })
+    }
+
     // Current trend visual config
     const currentTrend = TREND_CONFIG[usageTrendMetric]
 
@@ -514,105 +543,189 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                             )}
                         </div>
                     </div>
-                    <div className="chart-body chart-body-dark">
+                    <div className="chart-body chart-body-dark" style={{ display: 'flex', gap: '20px' }}>
                         {usageTrendView === 'models' ? (
-                            <ResponsiveContainer width="100%" height={320}>
-                                {modelTrendData.length > 0 ? (
-                                    <AreaChart data={modelTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                                        <defs>
+                            <>
+                                <ResponsiveContainer width="70%" height={320}>
+                                    {modelTrendData.length > 0 ? (
+                                        <AreaChart data={modelTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                            <defs>
+                                                {activeTopModels.map((modelName) => {
+                                                    const color = getModelColor(modelName)
+                                                    const safeId = modelName.replace(/[^a-zA-Z0-9]/g, '_')
+                                                    return (
+                                                        <linearGradient key={safeId} id={`gradModel_${safeId}`} x1="0" y1="0" x2="0" y2="1">
+                                                            <stop offset="0%" stopColor={color} stopOpacity={0.5} />
+                                                            <stop offset="100%" stopColor={color} stopOpacity={0.03} />
+                                                        </linearGradient>
+                                                    )
+                                                })}
+                                            </defs>
+                                            <CartesianGrid strokeDasharray="4 4" stroke={isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'} />
+                                            <XAxis dataKey="time" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                                            <YAxis
+                                                stroke={isDarkMode ? '#6e7681' : '#57606a'}
+                                                tick={{ fontSize: 11 }}
+                                                axisLine={false}
+                                                tickLine={false}
+                                                tickFormatter={formatNumber}
+                                            />
+                                            <Tooltip
+                                                content={({ active, payload, label }) => {
+                                                    if (!active || !payload?.length) return null
+                                                    const point = payload[0]?.payload
+                                                    const modelEntries = payload.filter(p => !p.dataKey.startsWith('_'))
+                                                    return (
+                                                        <div style={{
+                                                            background: isDarkMode ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.98)',
+                                                            border: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                                                            borderRadius: 10,
+                                                            padding: '10px 14px',
+                                                            boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+                                                            backdropFilter: 'blur(12px)',
+                                                            maxWidth: 280,
+                                                        }}>
+                                                            <div style={{ fontWeight: 600, marginBottom: 8, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk' }}>{label}</div>
+                                                            <div style={{ display: 'flex', gap: 12, marginBottom: 8, paddingBottom: 8, borderBottom: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}` }}>
+                                                                <div style={{ fontSize: 11 }}>
+                                                                    <span style={{ color: '#06b6d4' }}>Tokens</span>
+                                                                    <div style={{ fontWeight: 700, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk' }}>{formatNumber(point?._totalTokens || 0)}</div>
+                                                                </div>
+                                                                <div style={{ fontSize: 11 }}>
+                                                                    <span style={{ color: '#f59e0b' }}>Cost</span>
+                                                                    <div style={{ fontWeight: 700, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk' }}>${(point?._totalCost || 0).toFixed(2)}</div>
+                                                                </div>
+                                                                <div style={{ fontSize: 11 }}>
+                                                                    <span style={{ color: '#3b82f6' }}>Reqs</span>
+                                                                    <div style={{ fontWeight: 700, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk' }}>{formatNumber(point?._totalRequests || 0)}</div>
+                                                                </div>
+                                                            </div>
+                                                            {modelEntries.map((p, i) => (
+                                                                <div key={i} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'center', marginBottom: 3 }}>
+                                                                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, boxShadow: `0 0 6px ${p.color}`, flexShrink: 0 }}></span>
+                                                                    <span style={{ color: isDarkMode ? '#94A3B8' : '#475569', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                                                                    <span style={{ fontWeight: 600, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk', whiteSpace: 'nowrap' }}>
+                                                                        {formatNumber(p.value)}
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )
+                                                }}
+                                            />
                                             {activeTopModels.map((modelName) => {
                                                 const color = getModelColor(modelName)
                                                 const safeId = modelName.replace(/[^a-zA-Z0-9]/g, '_')
                                                 return (
-                                                    <linearGradient key={safeId} id={`gradModel_${safeId}`} x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="0%" stopColor={color} stopOpacity={0.5} />
-                                                        <stop offset="100%" stopColor={color} stopOpacity={0.03} />
-                                                    </linearGradient>
+                                                    <Area
+                                                        key={modelName}
+                                                        type="monotone"
+                                                        dataKey={modelName}
+                                                        stroke={color}
+                                                        fill={`url(#gradModel_${safeId})`}
+                                                        strokeWidth={2}
+                                                        dot={false}
+                                                        activeDot={{ r: 4, strokeWidth: 2 }}
+                                                        isAnimationActive={chartAnimated}
+                                                        animationDuration={1500}
+                                                    />
                                                 )
                                             })}
-                                        </defs>
-                                        <CartesianGrid strokeDasharray="4 4" stroke={isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'} />
-                                        <XAxis dataKey="time" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                                        <YAxis
-                                            stroke={isDarkMode ? '#6e7681' : '#57606a'}
-                                            tick={{ fontSize: 11 }}
-                                            axisLine={false}
-                                            tickLine={false}
-                                            tickFormatter={formatNumber}
-                                        />
-                                        <Tooltip
-                                            content={({ active, payload, label }) => {
-                                                if (!active || !payload?.length) return null
-                                                const point = payload[0]?.payload
-                                                const modelEntries = payload.filter(p => !p.dataKey.startsWith('_'))
-                                                return (
-                                                    <div style={{
-                                                        background: isDarkMode ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.98)',
-                                                        border: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
-                                                        borderRadius: 10,
-                                                        padding: '10px 14px',
-                                                        boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-                                                        backdropFilter: 'blur(12px)',
-                                                        maxWidth: 280,
-                                                    }}>
-                                                        <div style={{ fontWeight: 600, marginBottom: 8, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk' }}>{label}</div>
-                                                        <div style={{ display: 'flex', gap: 12, marginBottom: 8, paddingBottom: 8, borderBottom: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}` }}>
-                                                            <div style={{ fontSize: 11 }}>
-                                                                <span style={{ color: '#06b6d4' }}>Tokens</span>
-                                                                <div style={{ fontWeight: 700, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk' }}>{formatNumber(point?._totalTokens || 0)}</div>
-                                                            </div>
-                                                            <div style={{ fontSize: 11 }}>
-                                                                <span style={{ color: '#f59e0b' }}>Cost</span>
-                                                                <div style={{ fontWeight: 700, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk' }}>${(point?._totalCost || 0).toFixed(2)}</div>
-                                                            </div>
-                                                            <div style={{ fontSize: 11 }}>
-                                                                <span style={{ color: '#3b82f6' }}>Reqs</span>
-                                                                <div style={{ fontWeight: 700, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk' }}>{formatNumber(point?._totalRequests || 0)}</div>
-                                                            </div>
-                                                        </div>
-                                                        {modelEntries.map((p, i) => (
-                                                            <div key={i} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'center', marginBottom: 3 }}>
-                                                                <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, boxShadow: `0 0 6px ${p.color}`, flexShrink: 0 }}></span>
-                                                                <span style={{ color: isDarkMode ? '#94A3B8' : '#475569', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-                                                                <span style={{ fontWeight: 600, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: 'Space Grotesk', whiteSpace: 'nowrap' }}>
-                                                                    {formatNumber(p.value)}
-                                                                </span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )
+                                        </AreaChart>
+                                    ) : (
+                                        <AreaChart data={[]}>
+                                            <text x="50%" y="50%" textAnchor="middle" fill={isDarkMode ? '#64748B' : '#94A3B8'} fontSize={13}>No model data</text>
+                                        </AreaChart>
+                                    )}
+                                </ResponsiveContainer>
+                                <div className="chart-legend-panel" style={{
+                                    width: '28%',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '8px',
+                                    paddingTop: '10px',
+                                    overflowY: 'auto',
+                                    maxHeight: '320px'
+                                }}>
+                                    <div style={{
+                                        fontSize: '11px',
+                                        fontWeight: 600,
+                                        color: isDarkMode ? '#94A3B8' : '#475569',
+                                        marginBottom: '4px',
+                                        textTransform: 'uppercase',
+                                        letterSpacing: '0.5px',
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        paddingRight: '8px'
+                                    }}>
+                                        <span>Model</span>
+                                        <span>{usageTrendMetric === 'cost' ? 'Cost' : usageTrendMetric === 'tokens' ? 'Tokens' : 'Requests'}</span>
+                                    </div>
+                                    {activeTopModels.map((modelName) => {
+                                        const color = getModelColor(modelName)
+                                        const modelData = filteredModelUsage.find(m => m.model_name === modelName)
+                                        const value = usageTrendMetric === 'cost'
+                                            ? `$${(modelData?.estimated_cost_usd || 0).toFixed(2)}`
+                                            : usageTrendMetric === 'tokens'
+                                            ? formatNumber(modelData?.total_tokens || 0)
+                                            : formatNumber(modelData?.request_count || 0)
+
+                                        return (
+                                            <div key={modelName} onClick={() => openModelDrilldown(modelName)} style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '10px',
+                                                padding: '6px 10px',
+                                                background: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                                                borderRadius: '6px',
+                                                border: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}`,
+                                                cursor: 'pointer',
+                                                transition: 'all 0.2s ease'
                                             }}
-                                        />
-                                        <Legend
-                                            verticalAlign="top"
-                                            height={36}
-                                            formatter={(value) => <span style={{ color: isDarkMode ? '#94A3B8' : '#475569', fontSize: 11 }}>{value}</span>}
-                                        />
-                                        {activeTopModels.map((modelName) => {
-                                            const color = getModelColor(modelName)
-                                            const safeId = modelName.replace(/[^a-zA-Z0-9]/g, '_')
-                                            return (
-                                                <Area
-                                                    key={modelName}
-                                                    type="monotone"
-                                                    dataKey={modelName}
-                                                    stroke={color}
-                                                    fill={`url(#gradModel_${safeId})`}
-                                                    strokeWidth={2}
-                                                    dot={false}
-                                                    activeDot={{ r: 4, strokeWidth: 2 }}
-                                                    isAnimationActive={chartAnimated}
-                                                    animationDuration={1500}
-                                                />
-                                            )
-                                        })}
-                                    </AreaChart>
-                                ) : (
-                                    <AreaChart data={[]}>
-                                        <text x="50%" y="50%" textAnchor="middle" fill={isDarkMode ? '#64748B' : '#94A3B8'} fontSize={13}>No model data</text>
-                                    </AreaChart>
-                                )}
-                            </ResponsiveContainer>
+                                            onMouseEnter={(e) => {
+                                                e.currentTarget.style.background = isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'
+                                                e.currentTarget.style.borderColor = color
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.currentTarget.style.background = isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'
+                                                e.currentTarget.style.borderColor = isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'
+                                            }}>
+                                                <span style={{
+                                                    width: '10px',
+                                                    height: '10px',
+                                                    borderRadius: '50%',
+                                                    background: color,
+                                                    boxShadow: `0 0 8px ${color}`,
+                                                    flexShrink: 0
+                                                }}></span>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{
+                                                        fontSize: '11px',
+                                                        fontWeight: 500,
+                                                        color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                                                        overflow: 'hidden',
+                                                        textOverflow: 'ellipsis',
+                                                        whiteSpace: 'nowrap'
+                                                    }}>
+                                                        {modelName}
+                                                    </div>
+                                                </div>
+                                                <span style={{
+                                                    fontSize: '11px',
+                                                    fontWeight: 600,
+                                                    color: usageTrendMetric === 'cost'
+                                                        ? (isDarkMode ? '#10b981' : '#059669')
+                                                        : (isDarkMode ? '#F8FAFC' : '#0F172A'),
+                                                    fontFamily: 'monospace',
+                                                    flexShrink: 0
+                                                }}>
+                                                    {value}
+                                                </span>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </>
                         ) : (
                             /* Token Types: Input vs Output per model */
                             tokenTypeData.length > 0 ? (
@@ -687,44 +800,134 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                         </div>
                     </div>
                     {costView === 'chart' ? (
-                        <div className="chart-body chart-body-dark pie-container" style={{ minHeight: 300 }}>
+                        <div className="chart-body chart-body-dark pie-container" style={{ minHeight: 300, display: 'flex', gap: '20px' }}>
                             {costBreakdown.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <PieChart onClick={() => {
-                                        if (costBreakdown.length > 0) {
-                                            const models = {}
-                                            costBreakdown.forEach(m => {
-                                                models[m.model_name] = {
-                                                    requests: m.request_count,
-                                                    tokens: m.total_tokens,
-                                                    cost: m.estimated_cost_usd
-                                                }
-                                            })
-                                            setDrilldownData({ label: 'All Models', data: { models }, chartType: 'cost', title: 'Cost Breakdown — All Models' })
-                                        }
+                                <>
+                                    <ResponsiveContainer width="55%" height={300}>
+                                        <PieChart onClick={() => {
+                                            if (costBreakdown.length > 0) {
+                                                const models = {}
+                                                costBreakdown.forEach(m => {
+                                                    models[m.model_name] = {
+                                                        requests: m.request_count,
+                                                        tokens: m.total_tokens,
+                                                        cost: m.estimated_cost_usd
+                                                    }
+                                                })
+                                                setDrilldownData({ label: 'All Models', data: { models }, chartType: 'cost', title: 'Cost Breakdown — All Models' })
+                                            }
+                                        }}>
+                                            <Pie
+                                                data={costBreakdown}
+                                                dataKey="estimated_cost_usd"
+                                                nameKey="model_name"
+                                                cx="50%"
+                                                cy="50%"
+                                                outerRadius={110}
+                                                innerRadius={65}
+                                                label={false}
+                                                stroke={isDarkMode ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}
+                                                strokeWidth={2}
+                                                isAnimationActive={chartAnimated}
+                                                animationDuration={1500}
+                                            >
+                                                {costBreakdown.map((entry, index) => (
+                                                    <Cell key={`cell-${index}`} fill={entry.color} fillOpacity={0.85} />
+                                                ))}
+                                            </Pie>
+                                            <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} forceCurrency={true} />} />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                    <div className="chart-legend-panel" style={{
+                                        width: '43%',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '6px',
+                                        paddingTop: '10px',
+                                        overflowY: 'auto',
+                                        maxHeight: '300px'
                                     }}>
-                                        <Pie
-                                            data={costBreakdown}
-                                            dataKey="estimated_cost_usd"
-                                            nameKey="model_name"
-                                            cx="50%"
-                                            cy="50%"
-                                            outerRadius={110}
-                                            innerRadius={65}
-                                            label={({ model_name, percentage }) => `${model_name?.split('-').slice(-2).join('-') || ''} ${percentage}%`}
-                                            labelLine={{ stroke: isDarkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)' }}
-                                            stroke={isDarkMode ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}
-                                            strokeWidth={2}
-                                            isAnimationActive={chartAnimated}
-                                            animationDuration={1500}
-                                        >
-                                            {costBreakdown.map((entry, index) => (
-                                                <Cell key={`cell-${index}`} fill={entry.color} fillOpacity={0.85} />
-                                            ))}
-                                        </Pie>
-                                        <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} forceCurrency={true} />} />
-                                    </PieChart>
-                                </ResponsiveContainer>
+                                        <div style={{
+                                            fontSize: '11px',
+                                            fontWeight: 600,
+                                            color: isDarkMode ? '#94A3B8' : '#475569',
+                                            marginBottom: '4px',
+                                            textTransform: 'uppercase',
+                                            letterSpacing: '0.5px',
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            paddingRight: '8px'
+                                        }}>
+                                            <span>Model</span>
+                                            <span>Cost / %</span>
+                                        </div>
+                                        {costBreakdown.map((model, index) => (
+                                            <div key={index} onClick={() => openModelDrilldown(model.model_name)} style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '10px',
+                                                padding: '6px 10px',
+                                                background: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                                                borderRadius: '6px',
+                                                border: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}`,
+                                                cursor: 'pointer',
+                                                transition: 'all 0.2s ease'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                                e.currentTarget.style.background = isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'
+                                                e.currentTarget.style.borderColor = model.color
+                                            }}
+                                            onMouseLeave={(e) => {
+                                                e.currentTarget.style.background = isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'
+                                                e.currentTarget.style.borderColor = isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'
+                                            }}>
+                                                <span style={{
+                                                    width: '10px',
+                                                    height: '10px',
+                                                    borderRadius: '50%',
+                                                    background: model.color,
+                                                    boxShadow: `0 0 8px ${model.color}`,
+                                                    flexShrink: 0
+                                                }}></span>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{
+                                                        fontSize: '11px',
+                                                        fontWeight: 500,
+                                                        color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                                                        overflow: 'hidden',
+                                                        textOverflow: 'ellipsis',
+                                                        whiteSpace: 'nowrap'
+                                                    }}>
+                                                        {model.model_name}
+                                                    </div>
+                                                </div>
+                                                <div style={{
+                                                    display: 'flex',
+                                                    gap: '8px',
+                                                    alignItems: 'center',
+                                                    flexShrink: 0
+                                                }}>
+                                                    <span style={{
+                                                        fontSize: '11px',
+                                                        fontWeight: 600,
+                                                        color: isDarkMode ? '#10b981' : '#059669',
+                                                        fontFamily: 'monospace'
+                                                    }}>
+                                                        ${(model.estimated_cost_usd || 0).toFixed(2)}
+                                                    </span>
+                                                    <span style={{
+                                                        fontSize: '10px',
+                                                        color: isDarkMode ? '#64748B' : '#94A3B8',
+                                                        minWidth: '32px',
+                                                        textAlign: 'right'
+                                                    }}>
+                                                        {model.percentage}%
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
                             ) : (
                                 <div className="empty-state">No cost data</div>
                             )}
@@ -759,33 +962,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                 </thead>
                                 <tbody>
                                     {costBreakdown.length > 0 ? costBreakdown.map((m, i) => (
-                                        <tr key={i} className="clickable-row" onClick={() => {
-                                            const apiKeyRows = endpointUsage
-                                                .filter(ep => ep.models?.[m.model_name])
-                                                .map(ep => {
-                                                    const md = ep.models[m.model_name]
-                                                    return {
-                                                        _key: ep.endpoint,
-                                                        apiKey: ep.endpoint,
-                                                        requests: md.requests || md.request_count || 0,
-                                                        tokens: md.tokens || md.total_tokens || 0,
-                                                        cost: md.cost || md.estimated_cost_usd || 0,
-                                                    }
-                                                })
-                                                .sort((a, b) => b.requests - a.requests)
-                                            setDrilldownData({
-                                                label: m.model_name,
-                                                title: `${m.model_name} — Per API Key`,
-                                                chartType: 'modelApiKeys',
-                                                columns: [
-                                                    { key: 'apiKey', label: 'API Key' },
-                                                    { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
-                                                    { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
-                                                    { key: 'cost', label: 'Cost', render: v => `$${v.toFixed(4)}` },
-                                                ],
-                                                rows: apiKeyRows,
-                                            })
-                                        }}>
+                                        <tr key={i} className="clickable-row" onClick={() => openModelDrilldown(m.model_name)}>
                                             <td><span className="color-dot" style={{ background: m.color }}></span>{m.model_name}</td>
                                             <td>{formatNumber(m.request_count)}</td>
                                             <td>{formatNumber(m.input_tokens)}</td>
