@@ -863,7 +863,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                         onClick={() => { handleNavigate('skills'); setMenuOpen(false) }}
                         role="menuitem"
                         aria-current={activeTab === 'skills' ? 'page' : undefined}
-                        title="Claude Skills"
+                        title="Agent Skills"
                     >
                         <span className="drawer-nav-icon">
                             {/* Sparkle / star outline */}
@@ -871,7 +871,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                             </svg>
                         </span>
-                        <span className="drawer-nav-label">Claude Skills</span>
+                        <span className="drawer-nav-label">Agent Skills</span>
                     </button>
                     <button
                         className={activeTab === 'logs' ? 'active' : ''}

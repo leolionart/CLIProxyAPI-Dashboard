@@ -297,7 +297,11 @@ class PostgreSQLClient:
                 """)
                 conn.commit()
 
-                sql_files = sorted(migrations_dir.glob('*.sql'))
+                sql_files = sorted(
+                    sql_file
+                    for sql_file in migrations_dir.glob('*.sql')
+                    if not sql_file.name.startswith('.')
+                )
                 if not sql_files:
                     logger.info("No migration files found in %s", migrations_dir)
                     return

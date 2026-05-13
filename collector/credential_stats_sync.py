@@ -5,8 +5,8 @@ Parses per-credential and per-API-key usage statistics from CLIProxy
 Management API and stores aggregated results in Supabase.
 
 Data flow:
-1. Fetch /v0/management/usage    → get details[] with source, auth_index, tokens, failed
-2. Fetch /v0/management/auth-files → map auth_index to email, provider, name, status
+1. Fetch /v0/management/usage from the usage source → get details[] with source, auth_index, tokens, failed
+2. Fetch /v0/management/auth-files from CLIProxyAPI → map auth_index to email, provider, name, status
 3. Aggregate by credential (auth_index) and by API key
 4. Calculate deltas vs previous cumulative snapshot
 5. Merge deltas into credential_daily_stats (per-day)
@@ -45,6 +45,82 @@ AK_NUMERIC_FIELDS = [
 
 # Numeric fields on API key model entries
 AK_MODEL_NUMERIC_FIELDS = ['requests', 'tokens', 'success', 'failure']
+
+
+def _sum_model_details(model_data: Dict) -> None:
+    """Populate model totals when CPA-Manager only provides request details."""
+    if not isinstance(model_data, dict):
+        return
+
+    details = model_data.get('details')
+    if not isinstance(details, list):
+        return
+
+    total_requests = len(details)
+    failure_count = sum(1 for detail in details if isinstance(detail, dict) and detail.get('failed'))
+    success_count = total_requests - failure_count
+
+    input_tokens = 0
+    output_tokens = 0
+    reasoning_tokens = 0
+    cached_tokens = 0
+    total_tokens = 0
+
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        tokens = detail.get('tokens') or {}
+        if not isinstance(tokens, dict):
+            continue
+        input_tokens += int(tokens.get('input_tokens') or 0)
+        output_tokens += int(tokens.get('output_tokens') or 0)
+        reasoning_tokens += int(tokens.get('reasoning_tokens') or 0)
+        cached_tokens += int(tokens.get('cached_tokens') or tokens.get('cache_tokens') or 0)
+        total_tokens += int(tokens.get('total_tokens') or 0)
+
+    model_data.setdefault('total_requests', total_requests)
+    model_data.setdefault('success_count', success_count)
+    model_data.setdefault('failure_count', failure_count)
+    model_data.setdefault('input_tokens', input_tokens)
+    model_data.setdefault('output_tokens', output_tokens)
+    model_data.setdefault('reasoning_tokens', reasoning_tokens)
+    model_data.setdefault('cached_tokens', cached_tokens)
+    model_data.setdefault('total_tokens', total_tokens)
+
+
+def _normalize_model_totals(usage: Dict) -> Dict:
+    """Ensure each endpoint/model has the totals expected by the dashboard collector."""
+    if not isinstance(usage, dict):
+        return usage
+
+    for api_data in (usage.get('apis') or {}).values():
+        if not isinstance(api_data, dict):
+            continue
+        for model_data in (api_data.get('models') or {}).values():
+            _sum_model_details(model_data)
+
+    return usage
+
+
+def normalize_usage_payload(payload: Any) -> Optional[Dict]:
+    """
+    Normalize usage payloads from both legacy CLIProxyAPI and CPA-Manager.
+
+    Legacy CLIProxyAPI returned {"usage": {...}}. CPA-Manager Usage Service
+    exposes a compatible usage object directly at the top level.
+    """
+    if not isinstance(payload, dict):
+        return None
+    if isinstance(payload.get('usage'), dict):
+        _normalize_model_totals(payload['usage'])
+        return payload
+    if 'apis' in payload and any(
+        field in payload
+        for field in ('total_requests', 'success_count', 'failure_count', 'total_tokens')
+    ):
+        _normalize_model_totals(payload)
+        return {'usage': payload}
+    return payload
 
 
 def _cred_key(c: Dict) -> str:
@@ -274,8 +350,9 @@ class CredentialStatsSync:
     """Syncs per-credential usage statistics from CLIProxy."""
 
     def __init__(self, cliproxy_url: str, management_key: str, supabase_client,
-                 app_timezone=None):
+                 app_timezone=None, usage_url: Optional[str] = None):
         self.cliproxy_url = cliproxy_url.rstrip('/')
+        self.usage_url = (usage_url or cliproxy_url).rstrip('/')
         self.management_key = management_key
         self.supabase = supabase_client
         self.app_timezone = app_timezone or timezone(timedelta(hours=7))
@@ -285,13 +362,13 @@ class CredentialStatsSync:
         try:
             headers = {'Authorization': f'Bearer {self.management_key}'}
             resp = requests.get(
-                f"{self.cliproxy_url}/v0/management/usage",
+                f"{self.usage_url}/v0/management/usage",
                 headers=headers, timeout=30
             )
             if resp.status_code != 200:
                 logger.error(f"Usage API returned {resp.status_code}")
                 return None
-            return resp.json()
+            return normalize_usage_payload(resp.json())
         except Exception as e:
             logger.error(f"Failed to fetch usage: {e}")
             return None
@@ -679,10 +756,12 @@ class CredentialStatsSync:
 
 
 def sync_credential_stats(cliproxy_url: str, management_key: str,
-                          supabase_client, app_timezone=None) -> Dict:
+                          supabase_client, app_timezone=None,
+                          usage_url: Optional[str] = None) -> Dict:
     """Convenience function."""
     syncer = CredentialStatsSync(
         cliproxy_url, management_key, supabase_client,
-        app_timezone=app_timezone
+        app_timezone=app_timezone,
+        usage_url=usage_url,
     )
     return syncer.sync()

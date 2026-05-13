@@ -17,7 +17,7 @@ Real-time dashboard for monitoring CLIProxy usage, token consumption, estimated 
 ## Architecture
 
 ```text
-CLIProxy API → Collector (Python) → PostgreSQL
+CLIProxy API / CPA-Manager Usage Service → Collector (Python) → PostgreSQL
 Browser → Nginx:8417
           ├── /rest/v1/*       → PostgREST:3000 → PostgreSQL (read)
           └── /api/collector/* → collector:5001 (write/trigger)
@@ -42,14 +42,25 @@ remote-management:
   secret: "<your-management-secret>"
 ```
 
+For CLIProxyAPI v6.10+ / v7, usage statistics are served by an external usage
+service such as CPA-Manager. Keep the dashboard management URL pointed at
+CLIProxyAPI, and point the usage URL at the usage service:
+
+```yaml
+usage-statistics-enabled: true
+redis-usage-queue-retention-seconds: 3600
+```
+
 Quick verification:
 
 ```bash
 curl -H "Authorization: Bearer <your-management-secret>" \
-  http://localhost:8317/v0/management/usage
+  http://localhost:18317/v0/management/usage
 ```
 
-You should receive a JSON usage response.
+You should receive a JSON usage response. On older CLIProxyAPI versions that
+still expose `/v0/management/usage`, `CLIPROXY_URL` and `CLIPROXY_USAGE_URL`
+can be the same URL.
 
 ### 3) Clone and initialize submodule
 
@@ -70,6 +81,8 @@ Edit `.env`:
 ```env
 DB_PASSWORD=your_secure_password_here
 CLIPROXY_URL=http://host.docker.internal:8317
+# Optional: set this to CPA-Manager Usage Service for CLIProxyAPI v6.10+ / v7.
+CLIPROXY_USAGE_URL=http://host.docker.internal:18317
 CLIPROXY_MANAGEMENT_KEY=<your-management-secret>
 ADMIN_PASSWORD=change-me
 
@@ -87,6 +100,8 @@ Notes:
 - If you deploy behind HTTPS, set `ADMIN_SESSION_SECURE_COOKIE=true`.
 - Default host port for PostgREST is now `8418` to avoid common conflicts on `3000`. Override with `POSTGREST_HOST_PORT` if needed.
 - `ADMIN_ALLOWED_ORIGINS` is optional. Leave it empty for the default same-compose setup; set it only if you want stricter Origin/Referer enforcement.
+- `CLIPROXY_URL` is used for CLIProxyAPI management endpoints such as auth files.
+- `CLIPROXY_USAGE_URL` is used only for `/v0/management/usage`. For CPA-Manager, set it to the usage service URL.
 
 ### 5) Start services
 ```bash
@@ -164,6 +179,37 @@ export CLIPROXY_COLLECTOR_URL="https://your-domain/api/collector/skill-events"
 ```
 
 **Dedupe note:** do not run both marketplace plugin hook and a manual `PostToolUse: Skill` hook at the same time.
+
+</details>
+
+<details>
+<summary><h2>Codex Skill Tracking Hook</h2></summary>
+
+Codex skill tracking is best-effort because Codex does not currently emit a dedicated `Skill` tool event. CLIProxyDash supports an inferred Stop hook that reads the Codex session JSONL and sends rows to the existing skill endpoint with `source=codex-hook`.
+
+Add this command to your Codex `Stop` hooks, preserving any existing Stop hooks:
+
+```json
+{
+  "type": "command",
+  "command": "python3 \"/Volumes/DATA/Coding Projects/CLIProxyDash/scripts/codex_skill_usage_hook.py\"",
+  "timeout": 10
+}
+```
+
+Optional endpoint override:
+
+```bash
+export CLIPROXY_COLLECTOR_URL="https://your-domain/api/collector/skill-events"
+```
+
+Dry-run against a known session:
+
+```bash
+CLIPROXY_DRY_RUN=1 python3 scripts/codex_skill_usage_hook.py <<'JSON'
+{"session_path":"/Users/admin/.codex/sessions/YYYY/MM/DD/rollout-...jsonl"}
+JSON
+```
 
 </details>
 

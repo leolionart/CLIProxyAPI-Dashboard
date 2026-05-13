@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, Blueprint, request, make_response, Response, g
 from flask_cors import CORS
 from db import PostgreSQLClient
-from credential_stats_sync import sync_credential_stats
+from credential_stats_sync import sync_credential_stats, normalize_usage_payload
 from waitress import serve
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -51,9 +51,14 @@ def _env_int(name: str, default: int, min_value: int = 1) -> int:
         return max(min_value, default)
 
 
+def _env_url(name: str, default: str) -> str:
+    return (os.getenv(name) or default).strip().rstrip('/')
+
+
 # Configuration from environment
 DATABASE_URL = os.getenv('DATABASE_URL', '')
-CLIPROXY_URL = os.getenv('CLIPROXY_URL', 'http://localhost:8317')
+CLIPROXY_URL = _env_url('CLIPROXY_URL', 'http://localhost:8317')
+CLIPROXY_USAGE_URL = _env_url('CLIPROXY_USAGE_URL', CLIPROXY_URL)
 CLIPROXY_MANAGEMENT_KEY = os.getenv('CLIPROXY_MANAGEMENT_KEY', '')
 COLLECTOR_INTERVAL = _env_int('COLLECTOR_INTERVAL_SECONDS', 60)
 CREDENTIAL_SYNC_INTERVAL = _env_int('CREDENTIAL_SYNC_INTERVAL_SECONDS', COLLECTOR_INTERVAL)
@@ -570,7 +575,13 @@ def trigger_credential_stats_sync():
 
     def credential_stats_task():
         try:
-            stats = sync_credential_stats(CLIPROXY_URL, CLIPROXY_MANAGEMENT_KEY, db_client, app_timezone=APP_TIMEZONE)
+            stats = sync_credential_stats(
+                CLIPROXY_URL,
+                CLIPROXY_MANAGEMENT_KEY,
+                db_client,
+                app_timezone=APP_TIMEZONE,
+                usage_url=CLIPROXY_USAGE_URL,
+            )
             logger.info(f"Credential stats sync completed: {stats}")
         except Exception as e:
             logger.error(f"Credential stats sync failed: {e}", exc_info=True)
@@ -839,7 +850,11 @@ def run_full_sync_once():
         severity='info',
         title='Sync started',
         message='Collector full sync started.',
-        details={'cliproxy_url': CLIPROXY_URL, 'verbosity': LOG_VERBOSITY}
+        details={
+            'cliproxy_url': CLIPROXY_URL,
+            'cliproxy_usage_url': CLIPROXY_USAGE_URL,
+            'verbosity': LOG_VERBOSITY,
+        }
     )
 
     logger.info("Fetching usage data...")
@@ -956,20 +971,23 @@ def init_db() -> PostgreSQLClient:
 
 def fetch_usage_data() -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     # (Implementation from before)
-    url = f"{CLIPROXY_URL}/v0/management/usage"
+    url = f"{CLIPROXY_USAGE_URL}/v0/management/usage"
     headers = {'Authorization': f'Bearer {CLIPROXY_MANAGEMENT_KEY}'} if CLIPROXY_MANAGEMENT_KEY else {}
     started = time.time()
     try:
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
-        payload = response.json()
+        raw_payload = response.json()
+        payload = normalize_usage_payload(raw_payload)
         duration_ms = int((time.time() - started) * 1000)
         meta = {
             'cliproxy_url': CLIPROXY_URL,
+            'cliproxy_usage_url': CLIPROXY_USAGE_URL,
             'http_status': response.status_code,
             'latency_ms': duration_ms,
             'payload_bytes': len(response.content or b''),
             'has_usage': isinstance(payload, dict) and 'usage' in payload,
+            'normalized_usage_payload': payload is not raw_payload,
         }
         return payload, meta
     except requests.exceptions.RequestException as e:
@@ -981,9 +999,18 @@ def fetch_usage_data() -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
             severity='error',
             title='Usage API request failed',
             message=f'Failed to fetch usage data: {e}',
-            details={'cliproxy_url': CLIPROXY_URL, 'latency_ms': duration_ms}
+            details={
+                'cliproxy_url': CLIPROXY_URL,
+                'cliproxy_usage_url': CLIPROXY_USAGE_URL,
+                'latency_ms': duration_ms,
+            }
         )
-        return None, {'cliproxy_url': CLIPROXY_URL, 'latency_ms': duration_ms, 'error': str(e)}
+        return None, {
+            'cliproxy_url': CLIPROXY_URL,
+            'cliproxy_usage_url': CLIPROXY_USAGE_URL,
+            'latency_ms': duration_ms,
+            'error': str(e),
+        }
 
 def get_model_pricing() -> Dict[str, Dict[str, float]]:
     # (Implementation from before)
@@ -1670,7 +1697,13 @@ def main():
 
     # Schedule credential usage stats sync
     scheduler.add_job(
-        lambda: sync_credential_stats(CLIPROXY_URL, CLIPROXY_MANAGEMENT_KEY, db_client, app_timezone=APP_TIMEZONE),
+        lambda: sync_credential_stats(
+            CLIPROXY_URL,
+            CLIPROXY_MANAGEMENT_KEY,
+            db_client,
+            app_timezone=APP_TIMEZONE,
+            usage_url=CLIPROXY_USAGE_URL,
+        ),
         'interval',
         seconds=CREDENTIAL_SYNC_INTERVAL,
         id='credential_stats_sync',

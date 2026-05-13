@@ -8,8 +8,28 @@ Summary for AI agents: how skill run telemetry flows from clients → collector 
 - **Body:** `{ "events": [ { ... } ] }`
 - **Minimum required fields:** `skill_name`, `session_id`
 - **Primary idempotency key:** `event_uid` (fallback conflict key remains `(machine_id, sqlite_id, session_id, skill_name)` for backward compatibility)
+- **Provider/source marker:** Claude marketplace plugin sends `source = plugin`; Codex hook sends `source = codex-hook`.
 
 ## 2-phase telemetry lifecycle
+
+### Codex — Stop hook inferred final event
+
+Codex does not expose a first-class `Skill` tool event equivalent to Claude. The repo therefore ships a best-effort Stop hook:
+
+```bash
+python3 "/Volumes/DATA/Coding Projects/CLIProxyDash/scripts/codex_skill_usage_hook.py"
+```
+
+The hook reads the Codex session JSONL, infers skill usage from concrete evidence, and sends final rows directly with `is_skeleton = false`.
+
+Current evidence rules:
+- command/function-call arguments that include a `*/skills/<skill>/SKILL.md` read
+- assistant messages that explicitly announce skill usage
+
+Operational notes:
+- Treat Codex skill rows as inferred telemetry, not exact runtime events.
+- Keep `source = codex-hook` visible in drilldowns so they can be separated from Claude plugin rows.
+- The same `/skill-events` merge and aggregate path is reused, so no schema change is required.
 
 ### Phase 1 — Early skeleton (`PostToolUse` on `Skill`)
 

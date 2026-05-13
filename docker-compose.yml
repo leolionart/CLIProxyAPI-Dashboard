@@ -46,6 +46,7 @@ services:
     environment:
       DATABASE_URL: postgres://cliproxy:${DB_PASSWORD}@postgres:5432/cliproxy
       CLIPROXY_URL: ${CLIPROXY_URL:-http://host.docker.internal:8317}
+      CLIPROXY_USAGE_URL: ${CLIPROXY_USAGE_URL:-}
       CLIPROXY_MANAGEMENT_KEY: ${CLIPROXY_MANAGEMENT_KEY}
       COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-300}
       COLLECTOR_TRIGGER_PORT: 5001
