@@ -187,7 +187,17 @@ export CLIPROXY_COLLECTOR_URL="https://your-domain/api/collector/skill-events"
 
 Codex skill tracking is best-effort because Codex does not currently emit a dedicated `Skill` tool event. CLIProxyDash supports an inferred Stop hook that reads the Codex session JSONL and sends rows to the existing skill endpoint with `source=codex-hook`.
 
-On every machine that should report Codex skill usage, install the hook script:
+On every machine that should report Codex skill usage, run the one-step installer:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/leolionart/CLIProxyAPI-Dashboard/main/scripts/setup_codex_tracking.py \
+  | python3 - --collector-url "https://your-domain/api/collector/skill-events"
+```
+
+The installer downloads the hook script, creates a wrapper with the dashboard URL, enables `codex_hooks`, and appends the Stop hook without removing existing hooks.
+
+Manual setup, if needed:
 
 ```bash
 mkdir -p ~/.codex/hooks

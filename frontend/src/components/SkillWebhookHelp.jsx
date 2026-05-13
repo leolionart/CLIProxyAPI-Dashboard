@@ -71,6 +71,10 @@ curl -fsSL \\
   -o ~/.codex/hooks/codex_skill_usage_hook.py
 chmod +x ~/.codex/hooks/codex_skill_usage_hook.py`
 
+const CODEX_ONE_STEP_SETUP = `curl -fsSL \\
+  https://raw.githubusercontent.com/leolionart/CLIProxyAPI-Dashboard/main/scripts/setup_codex_tracking.py \\
+  | python3 - --collector-url "${collectorUrl}"`
+
 const CODEX_HOOKS_JSON = `{
   "hooks": {
     "Stop": [
@@ -140,6 +144,7 @@ function CodeBlock({ code, isDarkMode, language }) {
 
 function SetupGuide({ isDarkMode }) {
     const [showManual, setShowManual] = useState(false)
+    const [activeStack, setActiveStack] = useState('claude')
     const scriptPath = '~/.claude/hooks/track-skills.py'
 
     return (
@@ -152,22 +157,33 @@ function SetupGuide({ isDarkMode }) {
                     </div>
                     <div className="chart-body">
                         <p className="guide-intro">
-                            Track every Claude Code skill invocation (<code>/commit</code>, <code>/simplify</code>, etc.)
-                            in your dashboard — including token usage, duration, and project context.
+                            Choose the agent stack you want to connect. Claude Code uses the marketplace plugin path;
+                            Codex CLI uses the Stop hook installer. Both write to the shared <strong>Agent Skills</strong> dashboard.
                         </p>
+                        <div className="chart-tabs" style={{ marginBottom: 16 }}>
+                            <button className={`tab ${activeStack === 'claude' ? 'active' : ''}`} onClick={() => setActiveStack('claude')}>
+                                Claude Code
+                            </button>
+                            <button className={`tab ${activeStack === 'codex' ? 'active' : ''}`} onClick={() => setActiveStack('codex')}>
+                                Codex CLI
+                            </button>
+                            <button className={`tab ${activeStack === 'api' ? 'active' : ''}`} onClick={() => setActiveStack('api')}>
+                                Manual API
+                            </button>
+                        </div>
                         <div className="guide-flow">
                             <div className="guide-flow-step">
                                 <span className="guide-flow-icon">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
                                 </span>
-                                <span>Claude calls a Skill</span>
+                                <span>Agent uses a skill</span>
                             </div>
                             <span className="guide-flow-arrow">→</span>
                             <div className="guide-flow-step">
                                 <span className="guide-flow-icon">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
                                 </span>
-                                <span>Plugin sends event</span>
+                                <span>Hook sends event</span>
                             </div>
                             <span className="guide-flow-arrow">→</span>
                             <div className="guide-flow-step">
@@ -181,18 +197,15 @@ function SetupGuide({ isDarkMode }) {
                 </div>
             </div>
 
-            {/* ── Plugin Install ── */}
-            <div className="charts-row">
+            {/* ── Claude Stack ── */}
+            {activeStack === 'claude' && <div className="charts-row">
                 <div className="chart-card chart-full">
                     <div className="chart-header">
-                        <h3>
-                            <span className="guide-step-badge">1</span>
-                            Install the plugin
-                        </h3>
+                        <h3>Claude Code stack</h3>
                     </div>
                     <div className="chart-body">
                         <p className="guide-desc">
-                            Run these two commands inside Claude Code to add the marketplace and install the tracker plugin.
+                            Run these commands inside Claude Code to add the marketplace and install the tracker plugin.
                             This registers hooks automatically — no manual config needed.
                         </p>
                         <div className="guide-tip" style={{ marginBottom: 12 }}>
@@ -200,24 +213,7 @@ function SetupGuide({ isDarkMode }) {
                         </div>
                         <CodeBlock isDarkMode={isDarkMode} language="claude" code={`/plugin marketplace add leolionart/claude-skills`} />
                         <CodeBlock isDarkMode={isDarkMode} language="claude" code={`/plugin install claude-skill-tracker`} />
-                    </div>
-                </div>
-            </div>
-
-            {/* ── Set URL ── */}
-            <div className="charts-row">
-                <div className="chart-card chart-full">
-                    <div className="chart-header">
-                        <h3>
-                            <span className="guide-step-badge">2</span>
-                            Set your dashboard URL
-                        </h3>
-                    </div>
-                    <div className="chart-body">
-                        <p className="guide-desc">
-                            Add this environment variable to your shell profile (<code>~/.zshrc</code> or <code>~/.bashrc</code>)
-                            so the plugin knows where to send events:
-                        </p>
+                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>Dashboard endpoint</p>
                         <CodeBlock isDarkMode={isDarkMode} language="bash" code={`export CLIPROXY_COLLECTOR_URL="${collectorUrl}"`} />
                         <div className="guide-tip">
                             <strong>Local setup?</strong> If your dashboard runs on the same machine
@@ -227,23 +223,10 @@ function SetupGuide({ isDarkMode }) {
                             <strong>Important dedupe note:</strong> if you already installed <code>claude-skill-tracker</code> from marketplace,
                             do <strong>not</strong> keep a manual <code>PostToolUse: Skill</code> hook at the same time. Running both can send duplicate events.
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* ── Verify ── */}
-            <div className="charts-row">
-                <div className="chart-card chart-full">
-                    <div className="chart-header">
-                        <h3>
-                            <span className="guide-step-badge">3</span>
-                            Verify it works
-                        </h3>
-                    </div>
-                    <div className="chart-body">
+                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>Verify</p>
                         <p className="guide-desc">
                             Restart Claude Code (<code>/exit</code> then reopen), invoke any skill (e.g. type <code>/commit</code>),
-                            then check the <strong>Skills</strong> tab. Your run should appear within seconds.
+                            then check <strong>Agent Skills</strong>. Your run should appear within seconds.
                         </p>
                         <p className="guide-desc">Or test the endpoint directly with curl:</p>
                         <CodeBlock
@@ -267,22 +250,28 @@ function SetupGuide({ isDarkMode }) {
                         </div>
                     </div>
                 </div>
-            </div>
+            </div>}
 
             {/* ── Codex Setup ── */}
-            <div className="charts-row">
+            {activeStack === 'codex' && <div className="charts-row">
                 <div className="chart-card chart-full">
                     <div className="chart-header">
-                        <h3>
-                            <span className="guide-step-badge">4</span>
-                            Codex on other machines
-                        </h3>
+                        <h3>Codex CLI stack</h3>
                     </div>
                     <div className="chart-body">
                         <p className="guide-desc">
                             Install the Codex Stop hook on each machine that should report inferred skill usage.
                             The hook reads local Codex session JSONL files and sends final rows with <code>source=codex-hook</code>.
                         </p>
+
+                        <p className="guide-desc" style={{ fontWeight: 600 }}>One-step setup</p>
+                        <CodeBlock isDarkMode={isDarkMode} language="bash" code={CODEX_ONE_STEP_SETUP} />
+                        <div className="guide-tip">
+                            This installer downloads the hook, creates a wrapper with this dashboard URL, enables Codex hooks,
+                            and appends the Stop hook without removing existing hooks.
+                        </div>
+
+                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>Manual setup, if needed</p>
                         <p className="guide-desc" style={{ fontWeight: 600 }}>1. Install the hook script</p>
                         <CodeBlock isDarkMode={isDarkMode} language="bash" code={CODEX_INSTALL_COMMANDS} />
 
@@ -320,10 +309,10 @@ function SetupGuide({ isDarkMode }) {
                         </div>
                     </div>
                 </div>
-            </div>
+            </div>}
 
             {/* ── Manual Alternative (collapsible) ── */}
-            <div className="charts-row">
+            {activeStack === 'claude' && <div className="charts-row">
                 <div className="chart-card chart-full" style={{ border: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.06)' : '#e2e8f0'}` }}>
                     <div
                         className="chart-header"
@@ -368,10 +357,10 @@ function SetupGuide({ isDarkMode }) {
                         </div>
                     )}
                 </div>
-            </div>
+            </div>}
 
             {/* ── API Reference ── */}
-            <div className="charts-row">
+            {activeStack === 'api' && <div className="charts-row">
                 <div className="chart-card chart-full">
                     <div className="chart-header">
                         <h3>API Reference</h3>
@@ -433,7 +422,7 @@ function SetupGuide({ isDarkMode }) {
                         </div>
                     </div>
                 </div>
-            </div>
+            </div>}
         </div>
     )
 }
