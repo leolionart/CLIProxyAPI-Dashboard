@@ -133,6 +133,55 @@ def _ak_key(a: Dict) -> str:
     return a.get('api_key_name', '')
 
 
+def _short_auth_index(auth_index: str) -> str:
+    raw = str(auth_index or '').strip()
+    return raw[:8] if raw else ''
+
+
+def _detail_api_key_name(detail: Dict, cred_info: Dict) -> str:
+    """
+    Resolve the client/API-key identity for a usage detail.
+
+    CPA-Manager stores endpoint paths under usage.apis (for example
+    "POST /v1/chat/completions"), so that key is not an API key. Prefer any
+    explicit API-key fields if future payloads include them; otherwise use the
+    auth snapshot/credential identity that actually handled the request.
+    """
+    for field in (
+        'api_key_name', 'api_key_label', 'api_key_id', 'api_key_hash',
+        'key_name', 'consumer', 'client_id',
+    ):
+        value = str(detail.get(field) or '').strip()
+        if value:
+            return value
+
+    auth_index = str(detail.get('auth_index') or cred_info.get('auth_index') or '').strip()
+    label = str(
+        detail.get('auth_label_snapshot') or
+        cred_info.get('label') or
+        cred_info.get('email') or
+        ''
+    ).strip()
+    account = str(detail.get('account_snapshot') or '').strip()
+    auth_file = str(
+        detail.get('auth_file_snapshot') or
+        cred_info.get('name') or
+        detail.get('source') or
+        ''
+    ).strip()
+
+    short_idx = _short_auth_index(auth_index)
+    if label and short_idx:
+        return f"{label} ({short_idx})"
+    if account and short_idx:
+        return f"{account} ({short_idx})"
+    if auth_file:
+        return auth_file
+    if auth_index:
+        return auth_index
+    return 'unknown'
+
+
 def _calc_delta(new_val: int, old_val: int) -> int:
     """Calculate delta with restart detection (negative = restart, use new value)."""
     delta = new_val - old_val
@@ -233,6 +282,7 @@ def _calculate_api_key_deltas(
         delta = {
             'api_key_name': new_a.get('api_key_name', ''),
             'credentials_used': new_a.get('credentials_used', []),
+            'endpoints': new_a.get('endpoints', []),
         }
 
         for field in AK_NUMERIC_FIELDS:
@@ -337,6 +387,9 @@ def _merge_daily_api_keys(
             ex['models'] = ex_models
             ex['credentials_used'] = sorted(set(
                 ex.get('credentials_used', []) + delta.get('credentials_used', [])
+            ))
+            ex['endpoints'] = sorted(set(
+                ex.get('endpoints', []) + delta.get('endpoints', [])
             ))
         else:
             existing_map[key] = dict(delta)
@@ -498,9 +551,7 @@ class CredentialStatsSync:
 
         apis = usage_data.get('usage', {}).get('apis', {})
 
-        for api_key_name, api_data in apis.items():
-            ak = api_key_agg[api_key_name]
-
+        for api_endpoint, api_data in apis.items():
             for model_name, model_data in api_data.get('models', {}).items():
                 details = model_data.get('details', [])
 
@@ -519,6 +570,9 @@ class CredentialStatsSync:
                         cred['info'] = self.resolve_credential(
                             auth_idx, source, by_auth_index, by_name
                         )
+                    cred_info = cred['info'] or {}
+                    api_key_name = _detail_api_key_name(d, cred_info)
+                    ak = api_key_agg[api_key_name]
 
                     # Token values
                     in_tok = tokens.get('input_tokens', 0)
@@ -556,6 +610,7 @@ class CredentialStatsSync:
                     ak['total_tokens'] += tot_tok
                     ak['input_tokens'] += in_tok
                     ak['output_tokens'] += out_tok
+                    ak.setdefault('endpoints', set()).add(api_endpoint)
                     if failed:
                         ak['failure_count'] += 1
                     else:
@@ -622,6 +677,7 @@ class CredentialStatsSync:
                 'models': {
                     k: dict(v) for k, v in ak['models'].items()
                 },
+                'endpoints': sorted(ak.get('endpoints', set())),
                 'credentials_used': sorted(ak['credentials_used']),
             })
 
