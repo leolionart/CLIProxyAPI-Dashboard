@@ -473,10 +473,10 @@ function App() {
 
                 const { data: dailyBreakdownRows } = await dailyBreakdownQuery
                 for (const row of (dailyBreakdownRows || [])) {
-                    const endpoints = row?.breakdown?.endpoints || {}
+                    const apiKeys = row?.breakdown?.api_keys || row?.breakdown?.endpoints || {}
                     const costMap = {}
-                    for (const [apiKeyName, endpointData] of Object.entries(endpoints)) {
-                        costMap[apiKeyName] = endpointData?.cost || 0
+                    for (const [apiKeyName, apiKeyData] of Object.entries(apiKeys)) {
+                        costMap[apiKeyName] = apiKeyData?.cost || 0
                     }
                     dailyCostByDate[row.stat_date] = costMap
                 }
@@ -534,44 +534,42 @@ function App() {
             const readCumulativeApis = (snap) => {
                 const apis = snap?.raw_data?.usage?.apis || {}
                 const out = {}
-                for (const [apiKeyName, apiData] of Object.entries(apis)) {
+                for (const apiData of Object.values(apis)) {
                     const models = apiData?.models || {}
-                    let req = 0
-                    let succ = 0
-                    let fail = 0
-                    let inTok = 0
-                    let outTok = 0
-                    let totalTok = 0
                     for (const modelData of Object.values(models)) {
-                        req += modelData?.total_requests || 0
-                        succ += modelData?.success_count || 0
-                        fail += modelData?.failure_count || 0
-                        const mIn = modelData?.input_tokens || 0
-                        const mOut = modelData?.output_tokens || 0
-                        const mTok = modelData?.total_tokens || 0
-                        inTok += mIn
-                        outTok += mOut
-                        totalTok += mTok || (mIn + mOut)
-                    }
-                    out[apiKeyName] = {
-                        total_requests: req,
-                        success_count: succ,
-                        failure_count: fail,
-                        input_tokens: inTok,
-                        output_tokens: outTok,
-                        total_tokens: totalTok,
+                        for (const detail of (modelData?.details || [])) {
+                            const apiKeyName = detail?.api_key_name || detail?.api_key_hash || 'unknown'
+                            const tokens = detail?.tokens || {}
+                            if (!out[apiKeyName]) {
+                                out[apiKeyName] = {
+                                    total_requests: 0,
+                                    success_count: 0,
+                                    failure_count: 0,
+                                    input_tokens: 0,
+                                    output_tokens: 0,
+                                    reasoning_tokens: 0,
+                                    cached_tokens: 0,
+                                    total_tokens: 0,
+                                }
+                            }
+                            out[apiKeyName].total_requests += 1
+                            out[apiKeyName].success_count += detail?.failed ? 0 : 1
+                            out[apiKeyName].failure_count += detail?.failed ? 1 : 0
+                            out[apiKeyName].input_tokens += tokens.input_tokens || 0
+                            out[apiKeyName].output_tokens += tokens.output_tokens || 0
+                            out[apiKeyName].reasoning_tokens += tokens.reasoning_tokens || 0
+                            out[apiKeyName].cached_tokens += tokens.cached_tokens || tokens.cache_tokens || 0
+                            out[apiKeyName].total_tokens += tokens.total_tokens || 0
+                        }
                     }
                 }
                 return out
             }
 
             const readCumulativeCostByApi = (snap) => {
-                const out = {}
-                for (const row of (snap?.model_usage || [])) {
-                    const key = row?.api_endpoint || 'unknown'
-                    out[key] = (out[key] || 0) + (parseFloat(row?.estimated_cost_usd) || 0)
-                }
-                return out
+                // Snapshot model_usage is keyed by HTTP endpoint/model, not inbound
+                // API key. Daily SQLite-derived breakdown supplies API-key cost.
+                return {}
             }
 
             const mergeHourEntry = (hourMap, hourKey, apiKeyName, delta) => {
@@ -588,6 +586,8 @@ function App() {
                         failure_count: 0,
                         input_tokens: 0,
                         output_tokens: 0,
+                        reasoning_tokens: 0,
+                        cached_tokens: 0,
                         estimated_cost_usd: 0,
                     }
                 }
@@ -598,6 +598,8 @@ function App() {
                 keyRow.failure_count += delta.failure_count
                 keyRow.input_tokens += delta.input_tokens
                 keyRow.output_tokens += delta.output_tokens
+                keyRow.reasoning_tokens += delta.reasoning_tokens || 0
+                keyRow.cached_tokens += delta.cached_tokens || 0
                 keyRow.estimated_cost_usd += delta.estimated_cost_usd
                 hour.total_requests += delta.total_requests
                 hour.total_tokens += delta.total_tokens
@@ -625,6 +627,8 @@ function App() {
                                 failure_count: 0,
                                 input_tokens: 0,
                                 output_tokens: 0,
+                                reasoning_tokens: 0,
+                                cached_tokens: 0,
                             }
                             const c = curr[apiKeyName] || {
                                 total_requests: 0,
@@ -633,6 +637,8 @@ function App() {
                                 failure_count: 0,
                                 input_tokens: 0,
                                 output_tokens: 0,
+                                reasoning_tokens: 0,
+                                cached_tokens: 0,
                             }
 
                             let delta = {
@@ -642,6 +648,8 @@ function App() {
                                 failure_count: c.failure_count - p.failure_count,
                                 input_tokens: c.input_tokens - p.input_tokens,
                                 output_tokens: c.output_tokens - p.output_tokens,
+                                reasoning_tokens: c.reasoning_tokens - p.reasoning_tokens,
+                                cached_tokens: c.cached_tokens - p.cached_tokens,
                                 estimated_cost_usd: (currCost[apiKeyName] || 0) - (prevCost[apiKeyName] || 0),
                             }
 
@@ -653,6 +661,8 @@ function App() {
                                     failure_count: c.failure_count,
                                     input_tokens: c.input_tokens,
                                     output_tokens: c.output_tokens,
+                                    reasoning_tokens: c.reasoning_tokens,
+                                    cached_tokens: c.cached_tokens,
                                     estimated_cost_usd: currCost[apiKeyName] || 0,
                                 }
                             }
@@ -663,6 +673,8 @@ function App() {
                             delta.failure_count = Math.max(0, delta.failure_count)
                             delta.input_tokens = Math.max(0, delta.input_tokens)
                             delta.output_tokens = Math.max(0, delta.output_tokens)
+                            delta.reasoning_tokens = Math.max(0, delta.reasoning_tokens || 0)
+                            delta.cached_tokens = Math.max(0, delta.cached_tokens || 0)
                             delta.estimated_cost_usd = Math.max(0, delta.estimated_cost_usd)
 
                             if (delta.total_requests > 0 || delta.total_tokens > 0 || delta.estimated_cost_usd > 0) {
@@ -759,7 +771,7 @@ function App() {
 
             let snapshotsQuery = supabase
                 .from('usage_snapshots')
-                .select('id, collected_at, total_requests, success_count, failure_count, total_tokens, model_usage(model_name, request_count, total_tokens, estimated_cost_usd, input_tokens, output_tokens, reasoning_tokens, cached_tokens)')
+                .select('id, collected_at, total_requests, success_count, failure_count, total_tokens, raw_data, model_usage(model_name, request_count, total_tokens, estimated_cost_usd, input_tokens, output_tokens, reasoning_tokens, cached_tokens)')
                 .order('collected_at', { ascending: true })
 
             if (startTime) {
@@ -859,7 +871,8 @@ function App() {
 
             let dailyStatsFromDB = {}
             let breakdownByDate = {}
-            let aggregatedBreakdown = { models: {}, endpoints: {} }
+            let apiKeyBreakdownByDate = {}
+            let aggregatedBreakdown = { models: {}, endpoints: {}, api_keys: {} }
             let hasBreakdownData = false
 
             if (rangeId === 'all' || startDate) {
@@ -889,6 +902,9 @@ function App() {
 
                         if (b.models) {
                             breakdownByDate[row.stat_date] = b.models
+                        }
+                        if (b.api_keys) {
+                            apiKeyBreakdownByDate[row.stat_date] = b.api_keys
                         }
 
                         if (b.models) {
@@ -942,6 +958,46 @@ function App() {
                                 }
                             }
                         }
+
+                        if (b.api_keys) {
+                            for (const [apiKeyName, data] of Object.entries(b.api_keys)) {
+                                if (!aggregatedBreakdown.api_keys[apiKeyName]) {
+                                    aggregatedBreakdown.api_keys[apiKeyName] = {
+                                        api_endpoint: apiKeyName,
+                                        request_count: 0,
+                                        total_tokens: 0,
+                                        input_tokens: 0,
+                                        output_tokens: 0,
+                                        reasoning_tokens: 0,
+                                        cached_tokens: 0,
+                                        estimated_cost_usd: 0,
+                                        success_count: 0,
+                                        failure_count: 0,
+                                        models: {},
+                                        isApiKeyUsage: true,
+                                    }
+                                }
+                                const keyUsage = aggregatedBreakdown.api_keys[apiKeyName]
+                                keyUsage.request_count += data.requests || 0
+                                keyUsage.total_tokens += data.tokens || 0
+                                keyUsage.input_tokens += data.input_tokens || 0
+                                keyUsage.output_tokens += data.output_tokens || 0
+                                keyUsage.reasoning_tokens += data.reasoning_tokens || 0
+                                keyUsage.cached_tokens += data.cached_tokens || 0
+                                keyUsage.estimated_cost_usd += data.cost || 0
+                                keyUsage.success_count += data.success || 0
+                                keyUsage.failure_count += data.failure || 0
+
+                                for (const [mName, mData] of Object.entries(data.models || {})) {
+                                    if (!keyUsage.models[mName]) {
+                                        keyUsage.models[mName] = { requests: 0, cost: 0, tokens: 0 }
+                                    }
+                                    keyUsage.models[mName].requests += mData.requests || 0
+                                    keyUsage.models[mName].cost += mData.cost || 0
+                                    keyUsage.models[mName].tokens += mData.tokens || 0
+                                }
+                            }
+                        }
                     }
                 })
             }
@@ -962,7 +1018,8 @@ function App() {
                     success_count: fromDB?.success_count ?? (calculated?.success || 0),
                     failure_count: fromDB?.failure_count ?? (calculated?.failure || 0),
                     estimated_cost_usd: fromDB?.estimated_cost_usd ?? 0,
-                    models: breakdownByDate[dateKey] || {}
+                    models: breakdownByDate[dateKey] || {},
+                    api_keys: apiKeyBreakdownByDate[dateKey] || {}
                 }
             }).sort((a, b) => a.stat_date.localeCompare(b.stat_date))
 
@@ -977,7 +1034,8 @@ function App() {
                     time: `${hourKey}:00`,
                     requests: hData.requests,
                     tokens: hData.tokens,
-                    models: hData.models || {}
+                    models: hData.models || {},
+                    api_keys: {}
                 }
             })
             setHourlyStats(hourlyArray)
@@ -987,8 +1045,12 @@ function App() {
                     .sort((a, b) => b.estimated_cost_usd - a.estimated_cost_usd)
                 setModelUsage(finalModels)
 
-                const finalEndpoints = Object.values(aggregatedBreakdown.endpoints)
+                const finalApiKeys = Object.values(aggregatedBreakdown.api_keys)
                     .sort((a, b) => b.estimated_cost_usd - a.estimated_cost_usd)
+                const finalEndpoints = finalApiKeys.length > 0
+                    ? finalApiKeys
+                    : Object.values(aggregatedBreakdown.endpoints)
+                        .sort((a, b) => b.estimated_cost_usd - a.estimated_cost_usd)
                 setEndpointUsage(finalEndpoints)
             } else {
                 if (snapshotsData?.length > 0) {

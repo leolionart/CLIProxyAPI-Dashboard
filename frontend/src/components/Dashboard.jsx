@@ -385,6 +385,62 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return '$' + Math.round(cost).toLocaleString('en-US')
     }
 
+    // API key usage. When CPA_USAGE_DB_PATH is mounted, collector resolves
+    // CPA usage_events.api_key_hash back to configured inbound API-key names.
+    const endpointUsage = useMemo(() => {
+        const sourceRows = (rawEndpointUsage || []).length > 0
+            ? rawEndpointUsage
+            : (credentialData?.api_keys || []).map((key) => ({
+                api_endpoint: key.api_key_name || 'unknown',
+                request_count: key.total_requests || 0,
+                total_tokens: key.total_tokens || 0,
+                input_tokens: key.input_tokens || 0,
+                output_tokens: key.output_tokens || 0,
+                reasoning_tokens: key.reasoning_tokens || 0,
+                cached_tokens: key.cached_tokens || 0,
+                estimated_cost_usd: key.estimated_cost_usd || 0,
+                success_count: key.success_count || 0,
+                failure_count: key.failure_count || 0,
+                models: key.models || {},
+                endpoints: key.endpoints || [],
+                credentials_used: key.credentials_used || [],
+                isApiKeyUsage: true,
+            }))
+
+        const normalized = sourceRows
+            .map(m => {
+                const name = m.api_endpoint || 'Default'
+                const displayName = m.isApiKeyUsage
+                    ? name
+                    : (() => {
+                        const cleanName = name.replace(/^https?:\/\//, '')
+                        const parts = cleanName.split('/')
+                        return parts.length > 1 && parts[parts.length - 1]
+                            ? parts[parts.length - 1]
+                            : parts[0]
+                    })()
+
+                return {
+                    endpoint: displayName,
+                    endpoint_full: displayName,
+                    requests: m.request_count || 0,
+                    tokens: m.total_tokens || 0,
+                    cost: m.estimated_cost_usd || 0,
+                    ...m
+                }
+            })
+
+        if (endpointSort === 'cost') {
+            return normalized.sort((a, b) => (b.cost || 0) - (a.cost || 0))
+        }
+        if (endpointSort === 'tokens') {
+            return normalized.sort((a, b) => (b.tokens || 0) - (a.tokens || 0))
+        }
+        return normalized.sort((a, b) => (b.requests || 0) - (a.requests || 0))
+    }, [credentialData, rawEndpointUsage, endpointSort])
+
+    const apiKeyTotalCost = endpointUsage.reduce((sum, key) => sum + (key.cost || key.estimated_cost_usd || 0), 0)
+
     const formatDateLabel = (value) => value ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
     const formatISODate = (dateObj) => {
         if (!dateObj) return null
@@ -478,55 +534,84 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
     // Hourly data - with computed cost field
     const hourlyData = hourlyStats || []
     const hourlyChartData = useMemo(() => {
+        const keySeriesByHour = new Map((credentialTimeSeries?.byHour || []).map(row => [
+            String(row.hour || '').slice(-5),
+            row,
+        ]))
         return hourlyData.map(h => ({
             ...h,
-            cost: Object.values(h.models || {}).reduce((sum, m) => sum + (m.cost || 0), 0)
+            cost: Object.values(h.models || {}).reduce((sum, m) => sum + (m.cost || 0), 0),
+            api_keys: Object.fromEntries((keySeriesByHour.get(h.time)?.keys || []).map(key => [
+                key.api_key_name || 'unknown',
+                {
+                    requests: key.total_requests || 0,
+                    tokens: key.total_tokens || 0,
+                    cost: key.estimated_cost_usd || 0,
+                    input_tokens: key.input_tokens || 0,
+                    output_tokens: key.output_tokens || 0,
+                    reasoning_tokens: key.reasoning_tokens || 0,
+                    cached_tokens: key.cached_tokens || 0,
+                },
+            ]))
         }))
-    }, [hourlyData])
+    }, [hourlyData, credentialTimeSeries])
 
     // Daily data
     const dailyChartData = useMemo(() => {
+        const keySeriesByDate = new Map((credentialTimeSeries?.byDay || []).map(row => [row.stat_date, row]))
         return (filteredDailyStats || []).map(d => ({
             time: new Date(d.stat_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
             requests: d.total_requests,
             tokens: d.total_tokens,
             cost: parseFloat(d.estimated_cost_usd) || 0,
-            models: d.models || {}
+            models: d.models || {},
+            api_keys: Object.keys(d.api_keys || {}).length > 0
+                ? d.api_keys
+                : Object.fromEntries((keySeriesByDate.get(d.stat_date)?.keys || []).map(key => [
+                    key.api_key_name || 'unknown',
+                    {
+                        requests: key.total_requests || 0,
+                        tokens: key.total_tokens || 0,
+                        cost: key.estimated_cost_usd || 0,
+                        input_tokens: key.input_tokens || 0,
+                        output_tokens: key.output_tokens || 0,
+                    },
+                ]))
         }))
-    }, [filteredDailyStats])
+    }, [filteredDailyStats, credentialTimeSeries])
 
-    // Top 10 Models for Trends
+    // Top API keys for trends
     const topRequestModels = useMemo(() => {
-        return [...filteredModelUsage]
-            .sort((a, b) => (b.request_count || 0) - (a.request_count || 0))
+        return [...endpointUsage]
+            .sort((a, b) => (b.requests || b.request_count || 0) - (a.requests || a.request_count || 0))
             .slice(0, 10)
-            .map(m => m.model_name)
-    }, [filteredModelUsage])
+            .map(m => m.endpoint_full || m.endpoint || m.api_endpoint)
+    }, [endpointUsage])
 
     const topTokenModels = useMemo(() => {
-        return [...filteredModelUsage]
-            .sort((a, b) => (b.total_tokens || 0) - (a.total_tokens || 0))
+        return [...endpointUsage]
+            .sort((a, b) => (b.tokens || b.total_tokens || 0) - (a.tokens || a.total_tokens || 0))
             .slice(0, 10)
-            .map(m => m.model_name)
-    }, [filteredModelUsage])
+            .map(m => m.endpoint_full || m.endpoint || m.api_endpoint)
+    }, [endpointUsage])
 
-    // Top models sorted by requests (chart always shows requests)
+    // Top API keys sorted by requests (chart always shows requests)
     const activeTopModels = useMemo(() => {
-        return [...filteredModelUsage]
-            .sort((a, b) => (b.request_count || 0) - (a.request_count || 0))
+        return [...endpointUsage]
+            .sort((a, b) => (b.requests || b.request_count || 0) - (a.requests || a.request_count || 0))
             .slice(0, 10)
-            .map(m => m.model_name)
-    }, [filteredModelUsage])
+            .map(m => m.endpoint_full || m.endpoint || m.api_endpoint)
+    }, [endpointUsage])
 
-    // Legend ordering for Usage Trends: sort current top models by cost desc
+    // Legend ordering for Usage Trends: sort current top API keys by cost desc
     const activeTopModelsByCost = useMemo(() => {
-        const modelMap = new Map(filteredModelUsage.map(m => [m.model_name, m]))
+        const modelMap = new Map(endpointUsage.map(m => [m.endpoint_full || m.endpoint || m.api_endpoint, m]))
         return [...activeTopModels]
-            .map(name => modelMap.get(name) || { model_name: name })
-            .sort((a, b) => (b.estimated_cost_usd || 0) - (a.estimated_cost_usd || 0))
-    }, [activeTopModels, filteredModelUsage])
+            .map(name => modelMap.get(name) || { endpoint_full: name, api_endpoint: name })
+            .sort((a, b) => (b.cost || b.estimated_cost_usd || 0) - (a.cost || a.estimated_cost_usd || 0))
+    }, [activeTopModels, endpointUsage])
 
-    // Prepare data for Stacked Area Chart (By Model view)
+    // Prepare data for Stacked Area Chart (By API key view)
     const modelTrendData = useMemo(() => {
         const sourceData = usageTrendTime === 'hour' ? hourlyChartData : dailyChartData
 
@@ -538,7 +623,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                 _totalRequests: point.requests || 0,
             }
             activeTopModels.forEach(modelName => {
-                const modelData = point.models?.[modelName]
+                const modelData = point.api_keys?.[modelName] || point.models?.[modelName]
                 let val = 0
 
                 if (modelData) {
@@ -551,17 +636,17 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         })
     }, [hourlyChartData, dailyChartData, usageTrendTime, activeTopModels])
 
-    // Token Type Time-Series: clustered stacked by time, 4 groups per point, stacks = models
+    // Token Type Time-Series: clustered stacked by time, 4 groups per point, stacks = API keys
     // Hourly for today/yesterday, daily for multi-day ranges
     const { tokenTrendData, tokenTrendModels, tokenTrendTotals } = useMemo(() => {
         const isHourly = ['today', 'yesterday'].includes(dateRange)
         const sourceData = isHourly ? hourlyStats : dailyStats
 
-        // Find top models + accumulate per-type totals from same source as chart
+        // Find top API keys + accumulate per-type totals from same source as chart
         const modelTotals = {}
-        const typeTotals = {} // model → { input_tokens, output_tokens, cached_tokens, reasoning_tokens }
+        const typeTotals = {} // api key → { input_tokens, output_tokens, cached_tokens, reasoning_tokens }
         for (const point of (sourceData || [])) {
-            for (const [name, d] of Object.entries(point.models || {})) {
+            for (const [name, d] of Object.entries(point.api_keys || point.models || {})) {
                 const total = (d.input_tokens || 0) + (d.output_tokens || 0) +
                     (d.reasoning_tokens || 0) + (d.cached_tokens || 0)
                 if (total > 0) modelTotals[name] = (modelTotals[name] || 0) + total
@@ -583,7 +668,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                 : (point.stat_date || '').slice(5) // YYYY-MM-DD → MM-DD
             const row = { time: timeLabel }
             for (const model of topModels) {
-                const d = point.models?.[model] || {}
+                const d = point.api_keys?.[model] || point.models?.[model] || {}
                 row[`${model}||in`] = d.input_tokens || 0
                 row[`${model}||ca`] = d.cached_tokens || 0
                 row[`${model}||out`] = d.output_tokens || 0
@@ -595,57 +680,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return { tokenTrendData: data, tokenTrendModels: topModels, tokenTrendTotals: typeTotals }
     }, [hourlyStats, dailyStats, dateRange])
 
-    // API key usage. When CPA_USAGE_DB_PATH is mounted, collector resolves
-    // CPA usage_events.api_key_hash back to configured inbound API-key names.
-    const endpointUsage = useMemo(() => {
-        const apiKeys = credentialData?.api_keys || []
-        const sourceRows = apiKeys.length > 0
-            ? apiKeys.map((key) => ({
-                api_endpoint: key.api_key_name || 'unknown',
-                request_count: key.total_requests || 0,
-                total_tokens: key.total_tokens || 0,
-                input_tokens: key.input_tokens || 0,
-                output_tokens: key.output_tokens || 0,
-                estimated_cost_usd: key.estimated_cost_usd || 0,
-                models: key.models || {},
-                endpoints: key.endpoints || [],
-                credentials_used: key.credentials_used || [],
-                isApiKeyUsage: true,
-            }))
-            : (rawEndpointUsage || [])
-
-        const normalized = sourceRows
-            .map(m => {
-                const name = m.api_endpoint || 'Default'
-                const displayName = m.isApiKeyUsage
-                    ? name
-                    : (() => {
-                        const cleanName = name.replace(/^https?:\/\//, '')
-                        const parts = cleanName.split('/')
-                        return parts.length > 1 && parts[parts.length - 1]
-                            ? parts[parts.length - 1]
-                            : parts[0]
-                    })()
-
-                return {
-                    endpoint: displayName,
-                    endpoint_full: displayName,
-                    requests: m.request_count || 0,
-                    tokens: m.total_tokens || 0,
-                    cost: m.estimated_cost_usd || 0,
-                    ...m
-                }
-            })
-
-        if (endpointSort === 'cost') {
-            return normalized.sort((a, b) => (b.cost || 0) - (a.cost || 0))
-        }
-        if (endpointSort === 'tokens') {
-            return normalized.sort((a, b) => (b.tokens || 0) - (a.tokens || 0))
-        }
-        return normalized.sort((a, b) => (b.requests || 0) - (a.requests || 0))
-    }, [credentialData, rawEndpointUsage, endpointSort])
-
     const sparklineData = hourlyChartData.slice(-12)
     const costSparkline = dailyChartData.length >= 2 ? dailyChartData : [...Array(7)].map((_, i) => ({ cost: i === 6 ? totalCost : totalCost * (i * 0.1) }))
 
@@ -654,12 +688,17 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
 
     // Full dataset for Details tab (unlimited)
     const costBreakdownAllBase = useMemo(() => {
-        return (filteredModelUsage || []).map((m) => ({
+        const denominator = apiKeyTotalCost || totalCost
+        return (endpointUsage || []).map((m) => ({
             ...m,
-            percentage: totalCost > 0 ? ((m.estimated_cost_usd || 0) / totalCost * 100).toFixed(0) : '0',
-            color: getModelColor(m.model_name)
+            model_name: m.endpoint_full || m.endpoint || m.api_endpoint,
+            request_count: m.requests || m.request_count || 0,
+            total_tokens: m.tokens || m.total_tokens || 0,
+            estimated_cost_usd: m.cost || m.estimated_cost_usd || 0,
+            percentage: denominator > 0 ? (((m.cost || m.estimated_cost_usd || 0) / denominator) * 100).toFixed(0) : '0',
+            color: getModelColor(m.endpoint_full || m.endpoint || m.api_endpoint)
         }))
-    }, [filteredModelUsage, totalCost])
+    }, [endpointUsage, apiKeyTotalCost, totalCost])
 
     // Chart/legend dataset follows same top model scope as Usage Trends
     const costLegend = useMemo(() => {
@@ -697,6 +736,31 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
     const SortIcon = ({ column }) => {
         if (tableSort.column !== column) return <span className="sort-icon">↕</span>
         return <span className="sort-icon active">{tableSort.direction === 'asc' ? '↑' : '↓'}</span>
+    }
+
+    const openApiKeyDrilldown = (apiKeyName) => {
+        const item = endpointUsage.find(ep => (ep.endpoint_full || ep.endpoint || ep.api_endpoint) === apiKeyName)
+        const modelRows = Object.entries(item?.models || {})
+            .map(([name, m]) => ({
+                _key: name,
+                model: name,
+                requests: m.requests || m.request_count || 0,
+                tokens: m.tokens || m.total_tokens || 0,
+                cost: m.cost || m.estimated_cost_usd || 0,
+            }))
+            .sort((a, b) => b.requests - a.requests)
+        setDrilldownData({
+            label: apiKeyName,
+            title: `${apiKeyName} — Model Breakdown`,
+            chartType: 'apiKeyModels',
+            columns: [
+                { key: 'model', label: 'Model' },
+                { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
+                { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
+                { key: 'cost', label: 'Cost', render: v => formatCost(v) },
+            ],
+            rows: modelRows,
+        })
     }
 
     // Drilldown: show per-API-key breakdown for a given model
@@ -1081,14 +1145,14 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                 />
                             </div>
 
-                            {/* ===== Usage Trends (By Model × Metric × Time | Token Types) ===== */}
+                            {/* ===== Usage Trends (By API Key × Metric × Time | Token Types) ===== */}
                             <div className="charts-row">
                                 <div className="chart-card chart-full">
                                     <div className="chart-header">
                                         <h3>Usage Trends</h3>
                                         <div className="chart-controls">
                                             <div className="chart-tabs">
-                                                <button className={`tab ${usageTrendView === 'models' ? 'active' : ''}`} onClick={() => setUsageTrendView('models')}>Models</button>
+                                                <button className={`tab ${usageTrendView === 'models' ? 'active' : ''}`} onClick={() => setUsageTrendView('models')}>API Keys</button>
                                                 <button className={`tab ${usageTrendView === 'tokenTypes' ? 'active' : ''}`} onClick={() => setUsageTrendView('tokenTypes')}>Token Types</button>
                                             </div>
                                         </div>
@@ -1186,7 +1250,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                             </AreaChart>
                                                         ) : (
                                                             <AreaChart data={[]}>
-                                                                <text x="50%" y="50%" textAnchor="middle" fill={isDarkMode ? '#64748B' : '#94A3B8'} fontSize={13}>No model data</text>
+                                                                <text x="50%" y="50%" textAnchor="middle" fill={isDarkMode ? '#64748B' : '#94A3B8'} fontSize={13}>No API key data</text>
                                                             </AreaChart>
                                                         )}
                                                     </AutoWidthChart>
@@ -1211,18 +1275,18 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                         gap: '4px',
                                                         paddingRight: '4px'
                                                     }}>
-                                                        <span>Top 10 Models</span>
+                                                        <span>Top 10 API Keys</span>
                                                         <span style={{ textAlign: 'right' }}>Req</span>
                                                         <span style={{ textAlign: 'right' }}>Tokens</span>
                                                         <span style={{ textAlign: 'right', color: isDarkMode ? '#10b981' : '#059669' }}>Cost</span>
                                                     </div>
                                                     {activeTopModelsByCost.map((model) => {
-                                                        const modelName = model.model_name
+                                                        const modelName = model.endpoint_full || model.endpoint || model.api_endpoint || model.model_name
                                                         const color = getModelColor(modelName)
                                                         const modelData = model
 
                                                         return (
-                                                            <div key={modelName} onClick={() => openModelDrilldown(modelName)} style={{
+                                                            <div key={modelName} onClick={() => openApiKeyDrilldown(modelName)} style={{
                                                                 display: 'grid',
                                                                 gridTemplateColumns: '1fr 46px 46px 52px',
                                                                 gap: '4px',
@@ -1277,7 +1341,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                 </div>
                                             </div>
                                         ) : (
-                                            /* Token Types: Clustered stacked column — X = time, 4 clusters per tick, stacks = models */
+                                            /* Token Types: Clustered stacked column — X = time, 4 clusters per tick, stacks = API keys */
                                             <div className="chart-split" style={{ minHeight: 320 }}>
                                                 {/* Chart column */}
                                                 <div className="chart-split-main">
@@ -1319,9 +1383,9 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                                     const byModel = {}
                                                                     for (const p of payload) {
                                                                         if (!p.value) continue
-                                                                        const [model, type] = p.dataKey.split('||')
-                                                                        if (!byModel[model]) byModel[model] = {}
-                                                                        byModel[model][type] = (byModel[model][type] || 0) + p.value
+                                                                    const [apiKey, type] = p.dataKey.split('||')
+                                                                    if (!byModel[apiKey]) byModel[apiKey] = {}
+                                                                    byModel[apiKey][type] = (byModel[apiKey][type] || 0) + p.value
                                                                     }
                                                                     const typeLabels = { in: 'Input', out: 'Output', ca: 'Cached', re: 'Reasoning' }
                                                                     const grandTotal = payload.reduce((s, p) => s + (p.value || 0), 0)
@@ -1336,12 +1400,12 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                                             <div style={{ fontWeight: 700, marginBottom: 8, color: isDarkMode ? '#F8FAFC' : '#0F172A', fontFamily: CHART_TYPOGRAPHY.tooltipLabel.fontFamily }}>
                                                                                 {label}
                                                                             </div>
-                                                                            {Object.entries(byModel).map(([model, types]) => (
-                                                                                <div key={model} style={{ marginBottom: 6 }}>
+                                                                            {Object.entries(byModel).map(([apiKey, types]) => (
+                                                                                <div key={apiKey} style={{ marginBottom: 6 }}>
                                                                                     <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
-                                                                                        <span style={{ width: 8, height: 8, borderRadius: 2, background: getModelColor(model), display: 'inline-block' }} />
+                                                                                        <span style={{ width: 8, height: 8, borderRadius: 2, background: getModelColor(apiKey), display: 'inline-block' }} />
                                                                                         <span style={{ fontSize: 11, fontWeight: 600, color: isDarkMode ? '#CBD5E1' : '#334155' }}>
-                                                                                            {model.length > 22 ? '…' + model.slice(-18) : model}
+                                                                                            {apiKey.length > 22 ? '…' + apiKey.slice(-18) : apiKey}
                                                                                         </span>
                                                                                     </div>
                                                                                     {['in', 'out', 'ca', 're'].filter(t => types[t] > 0).map(t => (
@@ -1386,20 +1450,20 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                         gridTemplateColumns: '1fr 46px 46px 46px 46px',
                                                         gap: '4px', paddingRight: '4px'
                                                     }}>
-                                                        <span style={{ color: isDarkMode ? '#94A3B8' : '#475569' }}>Model</span>
+                                                        <span style={{ color: isDarkMode ? '#94A3B8' : '#475569' }}>API Key</span>
                                                         {TOKEN_TYPES.map(t => (
                                                             <span key={t.suffix} style={{ textAlign: 'right', color: t.color }}>{t.short}</span>
                                                         ))}
                                                     </div>
                                                     {tokenTrendModels
-                                                        .map(model => ({ model, cost: (filteredModelUsage.find(m => m.model_name === model)?.estimated_cost_usd) || 0 }))
+                                                        .map(model => ({ model, cost: (endpointUsage.find(m => (m.endpoint_full || m.endpoint || m.api_endpoint) === model)?.cost) || 0 }))
                                                         .sort((a, b) => b.cost - a.cost)
                                                         .map(({ model }) => {
                                                             const color = getModelColor(model)
                                                             const md = tokenTrendTotals[model] || {}
                                                             return (
                                                                 <div key={model}
-                                                                    onClick={() => openModelDrilldown(model)}
+                                                                    onClick={() => openApiKeyDrilldown(model)}
                                                                     onMouseEnter={(e) => {
                                                                         e.currentTarget.style.background = isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'
                                                                         e.currentTarget.style.borderColor = color
@@ -1457,15 +1521,28 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                         <AutoWidthChart height={300}>
                                                             <PieChart onClick={() => {
                                                                 if (costLegend.length > 0) {
-                                                                    const models = {}
+                                                                    const rows = []
                                                                     costLegend.forEach(m => {
-                                                                        models[m.model_name] = {
+                                                                        rows.push({
+                                                                            _key: m.model_name,
+                                                                            apiKey: m.model_name,
                                                                             requests: m.request_count,
                                                                             tokens: m.total_tokens,
-                                                                            cost: m.estimated_cost_usd
-                                                                        }
+                                                                            cost: m.estimated_cost_usd,
+                                                                        })
                                                                     })
-                                                                    setDrilldownData({ label: 'All Models', data: { models }, chartType: 'cost', title: 'Cost Breakdown — All Models' })
+                                                                    setDrilldownData({
+                                                                        label: 'All API Keys',
+                                                                        chartType: 'cost',
+                                                                        title: 'Cost Breakdown — All API Keys',
+                                                                        columns: [
+                                                                            { key: 'apiKey', label: 'API Key' },
+                                                                            { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
+                                                                            { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
+                                                                            { key: 'cost', label: 'Cost', render: v => formatCost(v) },
+                                                                        ],
+                                                                        rows,
+                                                                    })
                                                                 }
                                                             }}>
                                                                 <Pie
@@ -1509,11 +1586,11 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                             justifyContent: 'space-between',
                                                             paddingRight: '8px'
                                                         }}>
-                                                            <span>Top 10 Models</span>
+                                                            <span>Top 10 API Keys</span>
                                                             <span>Cost / %</span>
                                                         </div>
                                                         {costLegend.map((model, index) => (
-                                                            <div key={index} onClick={() => openModelDrilldown(model.model_name)} style={{
+                                                            <div key={index} onClick={() => openApiKeyDrilldown(model.model_name)} style={{
                                                                 display: 'flex',
                                                                 alignItems: 'center',
                                                                 gap: '10px',
@@ -1589,7 +1666,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                 <thead>
                                                     <tr>
                                                         <th onClick={() => handleSort('model_name')} className="sortable">
-                                                            Model <SortIcon column="model_name" />
+                                                            API Key <SortIcon column="model_name" />
                                                         </th>
                                                         <th onClick={() => handleSort('request_count')} className="sortable">
                                                             Requests <SortIcon column="request_count" />
@@ -1613,7 +1690,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                 </thead>
                                                 <tbody>
                                                     {costBreakdown.length > 0 ? costBreakdown.map((m, i) => (
-                                                        <tr key={i} className="clickable-row" onClick={() => openModelDrilldown(m.model_name)}>
+                                                        <tr key={i} className="clickable-row" onClick={() => openApiKeyDrilldown(m.model_name)}>
                                                             <td><span className="color-dot" style={{ background: m.color }}></span>{m.model_name}</td>
                                                             <td>{formatNumber(m.request_count)}</td>
                                                             <td>{formatNumber(m.input_tokens)}</td>
@@ -1630,11 +1707,11 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                     <tfoot>
                                                         <tr>
                                                             <td><strong>Total</strong></td>
-                                                            <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.request_count, 0))}</strong></td>
-                                                            <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.input_tokens, 0))}</strong></td>
-                                                            <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.output_tokens, 0))}</strong></td>
-                                                            <td><strong>{formatNumber((filteredModelUsage || []).reduce((s, m) => s + m.total_tokens, 0))}</strong></td>
-                                                            <td className="cost"><strong>{formatCost(totalCost)}</strong></td>
+                                                            <td><strong>{formatNumber((costBreakdownAllBase || []).reduce((s, m) => s + (m.request_count || 0), 0))}</strong></td>
+                                                            <td><strong>{formatNumber((costBreakdownAllBase || []).reduce((s, m) => s + (m.input_tokens || 0), 0))}</strong></td>
+                                                            <td><strong>{formatNumber((costBreakdownAllBase || []).reduce((s, m) => s + (m.output_tokens || 0), 0))}</strong></td>
+                                                            <td><strong>{formatNumber((costBreakdownAllBase || []).reduce((s, m) => s + (m.total_tokens || 0), 0))}</strong></td>
+                                                            <td className="cost"><strong>{formatCost(apiKeyTotalCost || totalCost)}</strong></td>
                                                             <td><strong>100%</strong></td>
                                                         </tr>
                                                     </tfoot>
