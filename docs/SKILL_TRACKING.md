@@ -30,6 +30,8 @@ Operational notes:
 - Treat Codex skill rows as inferred telemetry, not exact runtime events.
 - Keep `source = codex-hook` visible in drilldowns so they can be separated from Claude plugin rows.
 - The same `/skill-events` merge and aggregate path is reused, so no schema change is required.
+- For other machines, install the hook script under `~/.codex/hooks/`, set `CLIPROXY_COLLECTOR_URL`, enable `features.codex_hooks = true`, and append the command to `~/.codex/hooks.json` Stop hooks.
+- Codex sub-agent / agent lifecycle is not collected by this hook. It needs a separate agent event contract, collector endpoint, storage table, and dashboard view.
 
 ### Phase 1 — Early skeleton (`PostToolUse` on `Skill`)
 

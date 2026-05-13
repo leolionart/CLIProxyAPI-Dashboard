@@ -65,6 +65,35 @@ const SETTINGS_JSON = (scriptPath) => `{
   }
 }`
 
+const CODEX_INSTALL_COMMANDS = `mkdir -p ~/.codex/hooks
+curl -fsSL \\
+  https://raw.githubusercontent.com/leolionart/CLIProxyAPI-Dashboard/main/scripts/codex_skill_usage_hook.py \\
+  -o ~/.codex/hooks/codex_skill_usage_hook.py
+chmod +x ~/.codex/hooks/codex_skill_usage_hook.py`
+
+const CODEX_HOOKS_JSON = `{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \\"$HOME/.codex/hooks/codex_skill_usage_hook.py\\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}`
+
+const CODEX_CONFIG_TOML = `[features]
+codex_hooks = true`
+
+const CODEX_DRY_RUN = `CLIPROXY_DRY_RUN=1 python3 ~/.codex/hooks/codex_skill_usage_hook.py <<'JSON'
+{"session_path":"$HOME/.codex/sessions/YYYY/MM/DD/rollout-...jsonl"}
+JSON`
+
 function CopyButton({ text }) {
     const [copied, setCopied] = useState(false)
 
@@ -235,6 +264,59 @@ function SetupGuide({ isDarkMode }) {
                             <strong>What the plugin tracks:</strong> skill name, session ID, project directory,
                             input/output tokens, tool call count, duration, and model — all parsed automatically
                             from Claude's transcript.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* ── Codex Setup ── */}
+            <div className="charts-row">
+                <div className="chart-card chart-full">
+                    <div className="chart-header">
+                        <h3>
+                            <span className="guide-step-badge">4</span>
+                            Codex on other machines
+                        </h3>
+                    </div>
+                    <div className="chart-body">
+                        <p className="guide-desc">
+                            Install the Codex Stop hook on each machine that should report inferred skill usage.
+                            The hook reads local Codex session JSONL files and sends final rows with <code>source=codex-hook</code>.
+                        </p>
+                        <p className="guide-desc" style={{ fontWeight: 600 }}>1. Install the hook script</p>
+                        <CodeBlock isDarkMode={isDarkMode} language="bash" code={CODEX_INSTALL_COMMANDS} />
+
+                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>2. Point it at this dashboard</p>
+                        <CodeBlock isDarkMode={isDarkMode} language="bash" code={`export CLIPROXY_COLLECTOR_URL="${collectorUrl}"`} />
+                        <div className="guide-tip">
+                            Put this export in <code>~/.zshrc</code>, <code>~/.bashrc</code>, or the environment used to launch Codex on that machine.
+                        </div>
+
+                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>3. Enable Codex hooks</p>
+                        <p className="guide-desc">
+                            Add or keep this setting in <code>~/.codex/config.toml</code>:
+                        </p>
+                        <CodeBlock isDarkMode={isDarkMode} language="toml" code={CODEX_CONFIG_TOML} />
+
+                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>4. Register the Stop hook</p>
+                        <p className="guide-desc">
+                            Add the command below to <code>~/.codex/hooks.json</code>. If the file already has Stop hooks,
+                            append this command instead of replacing the existing hooks.
+                        </p>
+                        <CodeBlock isDarkMode={isDarkMode} language="json" code={CODEX_HOOKS_JSON} />
+
+                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>5. Test locally</p>
+                        <CodeBlock isDarkMode={isDarkMode} language="bash" code={CODEX_DRY_RUN} />
+                        <p className="guide-desc" style={{ marginTop: 10 }}>
+                            Then run a normal Codex session that uses a skill and check <strong>Agent Skills</strong>.
+                            The dashboard separates machines by <code>machine_id</code>.
+                        </p>
+
+                        <div className="guide-tip" style={{ marginTop: 14 }}>
+                            <strong>Current Codex coverage:</strong> skill usage is inferred from local session evidence,
+                            such as reading a <code>SKILL.md</code> file or an assistant message that announces a skill.
+                            Codex sub-agent / agent lifecycle is not collected by this Stop hook yet; that needs a separate
+                            Codex agent event pipeline, endpoint, and schema.
                         </div>
                     </div>
                 </div>

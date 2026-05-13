@@ -187,29 +187,48 @@ export CLIPROXY_COLLECTOR_URL="https://your-domain/api/collector/skill-events"
 
 Codex skill tracking is best-effort because Codex does not currently emit a dedicated `Skill` tool event. CLIProxyDash supports an inferred Stop hook that reads the Codex session JSONL and sends rows to the existing skill endpoint with `source=codex-hook`.
 
-Add this command to your Codex `Stop` hooks, preserving any existing Stop hooks:
+On every machine that should report Codex skill usage, install the hook script:
 
-```json
-{
-  "type": "command",
-  "command": "python3 \"/Volumes/DATA/Coding Projects/CLIProxyDash/scripts/codex_skill_usage_hook.py\"",
-  "timeout": 10
-}
+```bash
+mkdir -p ~/.codex/hooks
+curl -fsSL \
+  https://raw.githubusercontent.com/leolionart/CLIProxyAPI-Dashboard/main/scripts/codex_skill_usage_hook.py \
+  -o ~/.codex/hooks/codex_skill_usage_hook.py
+chmod +x ~/.codex/hooks/codex_skill_usage_hook.py
 ```
 
-Optional endpoint override:
+Set the dashboard endpoint in the shell environment used to launch Codex:
 
 ```bash
 export CLIPROXY_COLLECTOR_URL="https://your-domain/api/collector/skill-events"
 ```
 
+Enable hooks in `~/.codex/config.toml`:
+
+```toml
+[features]
+codex_hooks = true
+```
+
+Add this command to your Codex `Stop` hooks in `~/.codex/hooks.json`, preserving any existing Stop hooks:
+
+```json
+{
+  "type": "command",
+  "command": "python3 \"$HOME/.codex/hooks/codex_skill_usage_hook.py\"",
+  "timeout": 10
+}
+```
+
 Dry-run against a known session:
 
 ```bash
-CLIPROXY_DRY_RUN=1 python3 scripts/codex_skill_usage_hook.py <<'JSON'
-{"session_path":"/Users/admin/.codex/sessions/YYYY/MM/DD/rollout-...jsonl"}
+CLIPROXY_DRY_RUN=1 python3 ~/.codex/hooks/codex_skill_usage_hook.py <<'JSON'
+{"session_path":"$HOME/.codex/sessions/YYYY/MM/DD/rollout-...jsonl"}
 JSON
 ```
+
+Current Codex coverage: this hook collects inferred skill usage only. It does not collect Codex sub-agent / agent lifecycle yet; that requires a separate Codex agent event pipeline, endpoint, and schema.
 
 </details>
 
