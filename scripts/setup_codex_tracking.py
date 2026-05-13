@@ -116,7 +116,7 @@ def _install_stop_hook(hooks_path: Path, wrapper_path: Path, timeout: int) -> bo
     if not isinstance(stop_hooks, list):
         raise SystemExit(f"Expected hooks.Stop to be a list in {hooks_path}")
 
-    command = f'python3 "{wrapper_path}"'
+    command = f'sh "{wrapper_path}"'
     hook_entry = {
         "type": "command",
         "command": command,
