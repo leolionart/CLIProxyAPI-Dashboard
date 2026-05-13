@@ -136,7 +136,7 @@ const CustomTooltip = ({ active, payload, label, isDarkMode, forceCurrency }) =>
                 </div>
             ))}
 
-            {/* Model Breakdown for API Keys */}
+            {/* Model Breakdown for credential usage */}
             {hasModels && (
                 <div style={{ marginTop: 8, borderTop: `1px solid ${isDarkMode ? 'rgba(148, 163, 184, 0.2)' : 'rgba(71, 85, 105, 0.1)'}`, paddingTop: 8 }}>
                     <div style={{ fontSize: 10, color: isDarkMode ? '#94A3B8' : '#64748B', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Top Models</div>
@@ -164,7 +164,7 @@ const CustomTooltip = ({ active, payload, label, isDarkMode, forceCurrency }) =>
     )
 }
 
-// Custom Label for API Keys chart to show context-aware metrics
+// Custom Label for credential usage chart to show context-aware metrics
 const shortenApiKeyLabel = (key) => {
     const v = String(key || '')
     if (v.length <= 36) return v
@@ -595,27 +595,32 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return { tokenTrendData: data, tokenTrendModels: topModels, tokenTrendTotals: typeTotals }
     }, [hourlyStats, dailyStats, dateRange])
 
-    // API key usage - prefer credential_daily_stats.api_keys. The legacy
-    // daily_stats breakdown stores endpoint paths here, not client/API keys.
+    // Credential usage. CPA currently emits auth/credential snapshots in
+    // details[], not real client API-key IDs.
     const endpointUsage = useMemo(() => {
-        const credentialApiKeys = credentialData?.api_keys || []
-        const sourceRows = credentialApiKeys.length > 0
-            ? credentialApiKeys.map((key) => ({
-                api_endpoint: key.api_key_name || 'unknown',
-                request_count: key.total_requests || 0,
-                total_tokens: key.total_tokens || 0,
-                estimated_cost_usd: key.estimated_cost_usd || 0,
-                models: key.models || {},
-                endpoints: key.endpoints || [],
-                credentials_used: key.credentials_used || [],
-                isCredentialApiKey: true,
+        const credentials = credentialData?.credentials || []
+        const sourceRows = credentials.length > 0
+            ? credentials.map((cred) => ({
+                api_endpoint: cred.label || cred.email || cred.source || cred.auth_index || 'unknown',
+                request_count: cred.total_requests || 0,
+                total_tokens: cred.total_tokens || 0,
+                input_tokens: cred.input_tokens || 0,
+                output_tokens: cred.output_tokens || 0,
+                reasoning_tokens: cred.reasoning_tokens || 0,
+                cached_tokens: cred.cached_tokens || 0,
+                estimated_cost_usd: cred.estimated_cost_usd || 0,
+                models: cred.models || {},
+                endpoints: cred.api_keys || [],
+                auth_index: cred.auth_index || '',
+                provider: cred.provider || '',
+                isCredentialUsage: true,
             }))
             : (rawEndpointUsage || [])
 
         const normalized = sourceRows
             .map(m => {
                 const name = m.api_endpoint || 'Default'
-                const displayName = m.isCredentialApiKey
+                const displayName = m.isCredentialUsage
                     ? name
                     : (() => {
                         const cleanName = name.replace(/^https?:\/\//, '')
@@ -697,7 +702,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return <span className="sort-icon active">{tableSort.direction === 'asc' ? '↑' : '↓'}</span>
     }
 
-    // Drilldown: show per-API-key breakdown for a given model
+    // Drilldown: show per-credential breakdown for a given model
     const openModelDrilldown = (modelName) => {
         const apiKeyRows = endpointUsage
             .filter(ep => ep.models?.[modelName])
@@ -705,7 +710,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                 const md = ep.models[modelName]
                 return {
                     _key: ep.endpoint,
-                    apiKey: ep.endpoint_full || ep.endpoint,
+                    credential: ep.endpoint_full || ep.endpoint,
                     requests: md.requests || md.request_count || 0,
                     tokens: md.tokens || md.total_tokens || 0,
                     cost: md.cost || md.estimated_cost_usd || 0,
@@ -714,10 +719,10 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             .sort((a, b) => b.requests - a.requests)
         setDrilldownData({
             label: modelName,
-            title: `${modelName} — Per API Key`,
+            title: `${modelName} — Per Credential`,
             chartType: 'modelApiKeys',
             columns: [
-                { key: 'apiKey', label: 'API Key' },
+                { key: 'credential', label: 'Credential' },
                 { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
                 { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
                 { key: 'cost', label: 'Cost', render: v => formatCost(v) },
@@ -1643,15 +1648,14 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                 </div>
                             </div>
 
-                            {/* ===== API Keys ===== */}
+                            {/* ===== Credential Usage ===== */}
                             <div className="charts-row">
                                 <div className="chart-card chart-full">
                                     <div className="chart-header">
-                                        <h3>API Keys ({endpointUsage.length})</h3>
+                                        <h3>Credential Usage ({endpointUsage.length})</h3>
                                         <div className="chart-tabs">
                                             <button className={`tab ${endpointSort === 'requests' ? 'active' : ''}`} onClick={() => setEndpointSort('requests')}>Requests</button>
                                             <button className={`tab ${endpointSort === 'tokens' ? 'active' : ''}`} onClick={() => setEndpointSort('tokens')}>Tokens</button>
-                                            <button className={`tab ${endpointSort === 'cost' ? 'active' : ''}`} onClick={() => setEndpointSort('cost')}>Cost</button>
                                         </div>
                                     </div>
                                     <div className="chart-body chart-body-dark">
@@ -1664,7 +1668,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                     }
                                                 }}>
                                                     <defs>
-                                                        <linearGradient id="gradApiKeys" x1="0" y1="0" x2="1" y2="0">
+                                                        <linearGradient id="gradCredentialUsage" x1="0" y1="0" x2="1" y2="0">
                                                             <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.3} />
                                                             <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.9} />
                                                         </linearGradient>
@@ -1685,7 +1689,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                     <Bar
                                                         dataKey={endpointSort === 'cost' ? 'cost' : endpointSort === 'tokens' ? 'tokens' : 'requests'}
                                                         name={endpointSort === 'cost' ? 'Cost ($)' : endpointSort === 'tokens' ? 'Tokens' : 'Requests'}
-                                                        fill="url(#gradApiKeys)"
+                                                        fill="url(#gradCredentialUsage)"
                                                         stroke="#8b5cf6"
                                                         strokeWidth={1}
                                                         radius={[0, 4, 4, 0]}
@@ -1697,7 +1701,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                 </BarChart>
                                             </AutoWidthChart>
                                         ) : (
-                                            <div className="empty-state">No API key data</div>
+                                            <div className="empty-state">No credential usage data</div>
                                         )}
                                     </div>
                                 </div>

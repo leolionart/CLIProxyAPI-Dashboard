@@ -88,7 +88,7 @@ const ViewTabs = ({ activeView, onSwitch }) => (
       Credentials
     </button>
     <button className={`tab ${activeView === 'api_keys' ? 'active' : ''}`} onClick={() => onSwitch('api_keys')}>
-      API Keys
+      Token Usage
     </button>
   </div>
 )
@@ -306,7 +306,7 @@ function TopoCardContent({ cred, providerColor }) {
       )}
       {cred.api_keys?.length > 0 && (
         <div className="cred-topo-card-hint" title={cred.api_keys.join(', ')}>
-          via {cred.api_keys.map(shortenApiKeyLabel).join(', ')}
+          identity {cred.api_keys.map(shortenApiKeyLabel).join(', ')}
         </div>
       )}
     </>
@@ -380,10 +380,10 @@ function CredentialDetailContent({ cred }) {
         </div>
       )}
 
-      {/* API Keys used */}
+      {/* Usage identities derived from CPA credential snapshots */}
       {cred.api_keys?.length > 0 && (
         <div className="cred-dialog-apikeys">
-          <span className="cred-dialog-apikeys-label">API Keys:</span>
+          <span className="cred-dialog-apikeys-label">Usage Identity:</span>
           {cred.api_keys.map(k => <span key={k} className="cred-dialog-apikeys-tag" title={k}>{shortenApiKeyLabel(k)}</span>)}
         </div>
       )}
@@ -503,7 +503,7 @@ export default function CredentialStatsCard({ onRowClick, data, timeSeries, date
     return Object.entries(groups).sort(([, a], [, b]) => b.totalReqs - a.totalReqs)
   }, [credentials])
 
-  // API Keys sorting
+  // Credential token-usage sorting
   const sortedApiKeys = useMemo(() => {
     const items = [...apiKeys]
     const { key, dir } = sortConfig
@@ -621,7 +621,7 @@ export default function CredentialStatsCard({ onRowClick, data, timeSeries, date
         <div className="cred-stat-chip">
           <span className="cred-stat-chip-icon">&#x1F511;</span>
           <div className="cred-stat-chip-body">
-            <span className="cred-stat-chip-label">API KEYS</span>
+            <span className="cred-stat-chip-label">USAGE IDS</span>
             <span className="cred-stat-chip-value">{summary.apiKeyCount}</span>
           </div>
         </div>
@@ -656,7 +656,7 @@ export default function CredentialStatsCard({ onRowClick, data, timeSeries, date
         </div>
       ) : (
         <div className="cred-monitor-body">
-          <div className="cred-subtabs" role="tablist" aria-label="API Keys views">
+          <div className="cred-subtabs" role="tablist" aria-label="Credential token usage views">
             <button
               className={`cred-subtab ${apiKeysSubView === 'overview' ? 'active' : ''}`}
               onClick={() => setApiKeysSubView('overview')}
@@ -694,7 +694,7 @@ export default function CredentialStatsCard({ onRowClick, data, timeSeries, date
             <ApiKeyTimeSeriesChart
               rows={apiKeyDailySeries}
               bucketKey="stat_date"
-              emptyMessage="No daily API key data in selected range"
+              emptyMessage="No daily credential usage data in selected range"
             />
           )}
 
@@ -795,7 +795,7 @@ function ApiKeyTimeSeriesChart({ rows, bucketKey, emptyMessage }) {
   }
 
   if (!topKeys.length) {
-    return <div className="cred-time-empty">No API key activity in selected range</div>
+    return <div className="cred-time-empty">No credential activity in selected range</div>
   }
 
   return (
@@ -888,7 +888,7 @@ function ApiKeyTimeSeriesChart({ rows, bucketKey, emptyMessage }) {
 }
 
 /* ================================================================
-   API Keys Table (unchanged)
+   Credential token usage table
    ================================================================ */
 function ApiKeysTable({ items, onSort, SortIcon, expandedRow, setExpandedRow, onRowClick }) {
   return (
@@ -896,14 +896,14 @@ function ApiKeysTable({ items, onSort, SortIcon, expandedRow, setExpandedRow, on
       <table className="data-table cred-table">
         <thead>
           <tr>
-            <th onClick={() => onSort('api_key_name')} className="sortable">API Key <SortIcon column="api_key_name" /></th>
+            <th onClick={() => onSort('api_key_name')} className="sortable">Credential <SortIcon column="api_key_name" /></th>
             <th onClick={() => onSort('total_requests')} className="sortable">Requests <SortIcon column="total_requests" /></th>
             <th onClick={() => onSort('success_rate')} className="sortable">Success Rate <SortIcon column="success_rate" /></th>
             <th onClick={() => onSort('failure_count')} className="sortable">Failed <SortIcon column="failure_count" /></th>
             <th onClick={() => onSort('total_tokens')} className="sortable">Total Tokens <SortIcon column="total_tokens" /></th>
             <th onClick={() => onSort('input_tokens')} className="sortable">Input <SortIcon column="input_tokens" /></th>
             <th onClick={() => onSort('output_tokens')} className="sortable">Output <SortIcon column="output_tokens" /></th>
-            <th>Credentials Used</th>
+            <th>Auth Slots</th>
           </tr>
         </thead>
         <tbody>
@@ -942,7 +942,7 @@ function ApiKeysTable({ items, onSort, SortIcon, expandedRow, setExpandedRow, on
           <div className="cred-detail-panel">
             <div className="cred-detail-header">
               <span className="cred-apikey-badge" title={ak.api_key_name}>{shortenApiKeyLabel(ak.api_key_name)}</span>
-              <span className="cred-detail-email">{ak.credentials_used?.length || 0} credentials used</span>
+              <span className="cred-detail-email">{ak.credentials_used?.length || 0} auth slots</span>
             </div>
             <div className="cred-detail-models">
               <div className="cred-detail-model cred-detail-model-header">
