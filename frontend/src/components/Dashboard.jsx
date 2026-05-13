@@ -595,16 +595,35 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return { tokenTrendData: data, tokenTrendModels: topModels, tokenTrendTotals: typeTotals }
     }, [hourlyStats, dailyStats, dateRange])
 
-    // API Endpoint usage - uses granular endpointUsage passed from App.jsx
+    // API key usage - prefer credential_daily_stats.api_keys. The legacy
+    // daily_stats breakdown stores endpoint paths here, not client/API keys.
     const endpointUsage = useMemo(() => {
-        const normalized = (rawEndpointUsage || [])
+        const credentialApiKeys = credentialData?.api_keys || []
+        const sourceRows = credentialApiKeys.length > 0
+            ? credentialApiKeys.map((key) => ({
+                api_endpoint: key.api_key_name || 'unknown',
+                request_count: key.total_requests || 0,
+                total_tokens: key.total_tokens || 0,
+                estimated_cost_usd: key.estimated_cost_usd || 0,
+                models: key.models || {},
+                endpoints: key.endpoints || [],
+                credentials_used: key.credentials_used || [],
+                isCredentialApiKey: true,
+            }))
+            : (rawEndpointUsage || [])
+
+        const normalized = sourceRows
             .map(m => {
                 const name = m.api_endpoint || 'Default'
-                const cleanName = name.replace(/^https?:\/\//, '')
-                const parts = cleanName.split('/')
-                const displayName = parts.length > 1 && parts[parts.length - 1]
-                    ? parts[parts.length - 1]
-                    : parts[0]
+                const displayName = m.isCredentialApiKey
+                    ? name
+                    : (() => {
+                        const cleanName = name.replace(/^https?:\/\//, '')
+                        const parts = cleanName.split('/')
+                        return parts.length > 1 && parts[parts.length - 1]
+                            ? parts[parts.length - 1]
+                            : parts[0]
+                    })()
 
                 return {
                     endpoint: shortenApiKeyLabel(displayName),
@@ -620,7 +639,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             return normalized.sort((a, b) => (b.cost || 0) - (a.cost || 0))
         }
         return normalized.sort((a, b) => (b.requests || 0) - (a.requests || 0))
-    }, [rawEndpointUsage, endpointSort])
+    }, [credentialData, rawEndpointUsage, endpointSort])
 
     const sparklineData = hourlyChartData.slice(-12)
     const costSparkline = dailyChartData.length >= 2 ? dailyChartData : [...Array(7)].map((_, i) => ({ cost: i === 6 ? totalCost : totalCost * (i * 0.1) }))
@@ -1674,7 +1693,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                 </BarChart>
                                             </AutoWidthChart>
                                         ) : (
-                                            <div className="empty-state">No endpoint data</div>
+                                            <div className="empty-state">No API key data</div>
                                         )}
                                     </div>
                                 </div>
