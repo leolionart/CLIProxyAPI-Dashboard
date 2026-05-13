@@ -639,8 +639,17 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
     // Token Type Time-Series: clustered stacked by time, 4 groups per point, stacks = API keys
     // Hourly for today/yesterday, daily for multi-day ranges
     const { tokenTrendData, tokenTrendModels, tokenTrendTotals } = useMemo(() => {
-        const isHourly = ['today', 'yesterday'].includes(dateRange)
-        const sourceData = isHourly ? hourlyStats : dailyStats
+        const hasTokenBreakdown = (rows) => (rows || []).some(point =>
+            Object.values(point.api_keys || point.models || {}).some(d =>
+                (d.input_tokens || 0) > 0 ||
+                (d.output_tokens || 0) > 0 ||
+                (d.reasoning_tokens || 0) > 0 ||
+                (d.cached_tokens || 0) > 0
+            )
+        )
+        const wantsHourly = ['today', 'yesterday'].includes(dateRange)
+        const useHourly = wantsHourly && hasTokenBreakdown(hourlyStats)
+        const sourceData = useHourly ? hourlyStats : dailyStats
 
         // Find top API keys + accumulate per-type totals from same source as chart
         const modelTotals = {}
@@ -663,7 +672,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             .map(([name]) => name)
 
         const data = (sourceData || []).map(point => {
-            const timeLabel = isHourly
+            const timeLabel = useHourly
                 ? point.time
                 : (point.stat_date || '').slice(5) // YYYY-MM-DD → MM-DD
             const row = { time: timeLabel }
