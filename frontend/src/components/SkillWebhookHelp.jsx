@@ -144,6 +144,7 @@ function CodeBlock({ code, isDarkMode, language }) {
 
 function SetupGuide({ isDarkMode }) {
     const [showManual, setShowManual] = useState(false)
+    const [showCodexManual, setShowCodexManual] = useState(false)
     const [activeStack, setActiveStack] = useState('claude')
     const scriptPath = '~/.claude/hooks/track-skills.py'
 
@@ -271,31 +272,6 @@ function SetupGuide({ isDarkMode }) {
                             and appends the Stop hook without removing existing hooks.
                         </div>
 
-                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>Manual setup, if needed</p>
-                        <p className="guide-desc" style={{ fontWeight: 600 }}>1. Install the hook script</p>
-                        <CodeBlock isDarkMode={isDarkMode} language="bash" code={CODEX_INSTALL_COMMANDS} />
-
-                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>2. Point it at this dashboard</p>
-                        <CodeBlock isDarkMode={isDarkMode} language="bash" code={`export CLIPROXY_COLLECTOR_URL="${collectorUrl}"`} />
-                        <div className="guide-tip">
-                            Put this export in <code>~/.zshrc</code>, <code>~/.bashrc</code>, or the environment used to launch Codex on that machine.
-                        </div>
-
-                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>3. Enable Codex hooks</p>
-                        <p className="guide-desc">
-                            Add or keep this setting in <code>~/.codex/config.toml</code>:
-                        </p>
-                        <CodeBlock isDarkMode={isDarkMode} language="toml" code={CODEX_CONFIG_TOML} />
-
-                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>4. Register the Stop hook</p>
-                        <p className="guide-desc">
-                            Add the command below to <code>~/.codex/hooks.json</code>. If the file already has Stop hooks,
-                            append this command instead of replacing the existing hooks.
-                        </p>
-                        <CodeBlock isDarkMode={isDarkMode} language="json" code={CODEX_HOOKS_JSON} />
-
-                        <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>5. Test locally</p>
-                        <CodeBlock isDarkMode={isDarkMode} language="bash" code={CODEX_DRY_RUN} />
                         <p className="guide-desc" style={{ marginTop: 10 }}>
                             Then run a normal Codex session that uses a skill and check <strong>Agent Skills</strong>.
                             The dashboard separates machines by <code>machine_id</code>.
@@ -306,6 +282,53 @@ function SetupGuide({ isDarkMode }) {
                             such as reading a <code>SKILL.md</code> file or an assistant message that announces a skill.
                             Codex sub-agent / agent lifecycle is not collected by this Stop hook yet; that needs a separate
                             Codex agent event pipeline, endpoint, and schema.
+                        </div>
+
+                        <div style={{ marginTop: 16, border: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.06)' : '#e2e8f0'}`, borderRadius: 8 }}>
+                            <div
+                                className="chart-header"
+                                style={{ cursor: 'pointer', padding: '12px 16px' }}
+                                onClick={() => setShowCodexManual(!showCodexManual)}
+                            >
+                                <h3 style={{ color: isDarkMode ? 'var(--color-text-secondary)' : '#64748b', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                                        style={{ transition: 'transform 0.2s', transform: showCodexManual ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                                    >
+                                        <polyline points="9 18 15 12 9 6" />
+                                    </svg>
+                                    Manual Setup (without one-step installer)
+                                </h3>
+                            </div>
+                            {showCodexManual && (
+                                <div className="chart-body">
+                                    <p className="guide-desc" style={{ fontWeight: 600 }}>1. Install the hook script</p>
+                                    <CodeBlock isDarkMode={isDarkMode} language="bash" code={CODEX_INSTALL_COMMANDS} />
+
+                                    <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>2. Point it at this dashboard</p>
+                                    <CodeBlock isDarkMode={isDarkMode} language="bash" code={`export CLIPROXY_COLLECTOR_URL="${collectorUrl}"`} />
+                                    <div className="guide-tip">
+                                        Put this export in <code>~/.zshrc</code>, <code>~/.bashrc</code>, or the environment used to launch Codex on that machine.
+                                    </div>
+
+                                    <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>3. Enable Codex hooks</p>
+                                    <p className="guide-desc">
+                                        Add or keep this setting in <code>~/.codex/config.toml</code>:
+                                    </p>
+                                    <CodeBlock isDarkMode={isDarkMode} language="toml" code={CODEX_CONFIG_TOML} />
+
+                                    <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>4. Register the Stop hook</p>
+                                    <p className="guide-desc">
+                                        Add the command below to <code>~/.codex/hooks.json</code>. If the file already has Stop hooks,
+                                        append this command instead of replacing the existing hooks.
+                                    </p>
+                                    <CodeBlock isDarkMode={isDarkMode} language="json" code={CODEX_HOOKS_JSON} />
+
+                                    <p className="guide-desc" style={{ fontWeight: 600, marginTop: 18 }}>5. Test locally</p>
+                                    <CodeBlock isDarkMode={isDarkMode} language="bash" code={CODEX_DRY_RUN} />
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
