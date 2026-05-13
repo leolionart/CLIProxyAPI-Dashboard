@@ -18,7 +18,10 @@ import requests
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone, timedelta, date
 from collections import defaultdict
+import hashlib
 import json
+import os
+import sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -412,6 +415,10 @@ class CredentialStatsSync:
 
     def fetch_usage(self) -> Optional[Dict]:
         """Fetch usage data from CLIProxy."""
+        sqlite_usage = self.fetch_usage_from_sqlite()
+        if sqlite_usage:
+            return sqlite_usage
+
         try:
             headers = {'Authorization': f'Bearer {self.management_key}'}
             resp = requests.get(
@@ -425,6 +432,139 @@ class CredentialStatsSync:
         except Exception as e:
             logger.error(f"Failed to fetch usage: {e}")
             return None
+
+    def fetch_api_keys(self) -> List[str]:
+        """Fetch configured inbound API keys so CPA api_key_hash can be labeled."""
+        try:
+            headers = {
+                'Authorization': f'Bearer {self.management_key}',
+                'X-Management-Key': self.management_key,
+            }
+            resp = requests.get(
+                f"{self.cliproxy_url}/v0/management/api-keys",
+                headers=headers, timeout=30
+            )
+            if resp.status_code != 200:
+                logger.warning(f"API keys endpoint returned {resp.status_code}")
+                return []
+            payload = resp.json()
+            values = payload.get('api-keys') or payload.get('api_keys') or []
+            return [str(v) for v in values if str(v or '').strip()]
+        except Exception as e:
+            logger.warning(f"Failed to fetch API keys: {e}")
+            return []
+
+    def _api_key_hash_map(self) -> Dict[str, str]:
+        mapping: Dict[str, str] = {}
+        for key in self.fetch_api_keys():
+            mapping[hashlib.sha256(key.encode('utf-8')).hexdigest()] = key
+        return mapping
+
+    def fetch_usage_from_sqlite(self) -> Optional[Dict]:
+        """
+        Read CPA-Manager SQLite directly when mounted.
+
+        CPA's /v0/management/usage response currently omits api_key_hash from
+        details[], while /data/usage.sqlite keeps it in usage_events. Reading the
+        SQLite DB lets the dashboard recover true inbound API-key attribution.
+        """
+        db_path = os.environ.get('CPA_USAGE_DB_PATH') or os.environ.get('CLIPROXY_USAGE_DB_PATH')
+        if not db_path or not os.path.exists(db_path):
+            return None
+
+        key_by_hash = self._api_key_hash_map()
+        usage = {
+            'total_requests': 0,
+            'success_count': 0,
+            'failure_count': 0,
+            'total_tokens': 0,
+            'apis': {},
+        }
+
+        try:
+            conn = sqlite3.connect(f'file:{db_path}?mode=ro', uri=True, timeout=10)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("""
+                SELECT
+                    timestamp,
+                    provider,
+                    model,
+                    endpoint,
+                    method,
+                    path,
+                    auth_type,
+                    auth_index,
+                    source,
+                    api_key_hash,
+                    account_snapshot,
+                    auth_label_snapshot,
+                    auth_file_snapshot,
+                    auth_provider_snapshot,
+                    auth_snapshot_at_ms,
+                    input_tokens,
+                    output_tokens,
+                    reasoning_tokens,
+                    cached_tokens,
+                    cache_tokens,
+                    total_tokens,
+                    latency_ms,
+                    failed
+                FROM usage_events
+                ORDER BY id ASC
+            """).fetchall()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Failed to read CPA usage sqlite at {db_path}: {e}", exc_info=True)
+            return None
+
+        for row in rows:
+            endpoint = row['endpoint'] or f"{row['method'] or 'POST'} {row['path'] or '/v1/chat/completions'}"
+            model = row['model'] or 'unknown'
+            failed = bool(row['failed'])
+            tokens = {
+                'input_tokens': int(row['input_tokens'] or 0),
+                'output_tokens': int(row['output_tokens'] or 0),
+                'reasoning_tokens': int(row['reasoning_tokens'] or 0),
+                'cached_tokens': int(row['cached_tokens'] or 0),
+                'cache_tokens': int(row['cache_tokens'] or 0),
+                'total_tokens': int(row['total_tokens'] or 0),
+            }
+            api_key_hash = str(row['api_key_hash'] or '').strip()
+            api_key_name = key_by_hash.get(api_key_hash) or (f"sha256:{api_key_hash[:12]}" if api_key_hash else '')
+
+            api_data = usage['apis'].setdefault(endpoint, {'models': {}})
+            model_data = api_data['models'].setdefault(model, {'details': []})
+            model_data['details'].append({
+                'timestamp': row['timestamp'],
+                'provider': row['provider'],
+                'auth_type': row['auth_type'],
+                'auth_index': row['auth_index'] or '',
+                'source': row['source'] or '',
+                'api_key_hash': api_key_hash,
+                'api_key_name': api_key_name,
+                'account_snapshot': row['account_snapshot'],
+                'auth_label_snapshot': row['auth_label_snapshot'],
+                'auth_file_snapshot': row['auth_file_snapshot'],
+                'auth_provider_snapshot': row['auth_provider_snapshot'],
+                'auth_snapshot_at_ms': row['auth_snapshot_at_ms'],
+                'latency_ms': row['latency_ms'],
+                'failed': failed,
+                'tokens': tokens,
+            })
+
+            usage['total_requests'] += 1
+            usage['total_tokens'] += tokens['total_tokens']
+            if failed:
+                usage['failure_count'] += 1
+            else:
+                usage['success_count'] += 1
+
+        _normalize_model_totals(usage)
+        logger.info(
+            "Loaded CPA usage sqlite: %s events, %s API key hash labels",
+            usage['total_requests'], len(key_by_hash)
+        )
+        return {'usage': usage}
 
     def fetch_auth_files(self) -> Optional[List[Dict]]:
         """Fetch auth files for credential mapping."""

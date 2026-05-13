@@ -47,6 +47,7 @@ services:
       DATABASE_URL: postgres://cliproxy:${DB_PASSWORD}@postgres:5432/cliproxy
       CLIPROXY_URL: ${CLIPROXY_URL:-http://host.docker.internal:8317}
       CLIPROXY_USAGE_URL: ${CLIPROXY_USAGE_URL:-}
+      CPA_USAGE_DB_PATH: ${CPA_USAGE_DB_PATH:-/cpa-data/usage.sqlite}
       CLIPROXY_MANAGEMENT_KEY: ${CLIPROXY_MANAGEMENT_KEY}
       COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-300}
       COLLECTOR_TRIGGER_PORT: 5001
@@ -59,6 +60,8 @@ services:
       ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - ${CPA_USAGE_DATA_DIR:-./cpa-data}:${CPA_USAGE_MOUNT_DIR:-/cpa-data}:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/api/collector/health')"]
       interval: 30s
