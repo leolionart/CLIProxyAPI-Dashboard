@@ -49,8 +49,7 @@ const getCredKey = (cred) => cred.auth_index || cred.source || cred.email
 
 const shortenApiKeyLabel = (key) => {
   const v = String(key || '')
-  if (v.length <= 16) return v
-  return `${v.slice(0, 6)}...${v.slice(-4)}`
+  return v || 'unknown'
 }
 
 /** SVG Donut ring */
@@ -901,7 +900,9 @@ function ApiKeysTable({ items, onSort, SortIcon, expandedRow, setExpandedRow, on
             <th onClick={() => onSort('total_requests')} className="sortable">Requests <SortIcon column="total_requests" /></th>
             <th onClick={() => onSort('success_rate')} className="sortable">Success Rate <SortIcon column="success_rate" /></th>
             <th onClick={() => onSort('failure_count')} className="sortable">Failed <SortIcon column="failure_count" /></th>
-            <th onClick={() => onSort('total_tokens')} className="sortable">Tokens <SortIcon column="total_tokens" /></th>
+            <th onClick={() => onSort('total_tokens')} className="sortable">Total Tokens <SortIcon column="total_tokens" /></th>
+            <th onClick={() => onSort('input_tokens')} className="sortable">Input <SortIcon column="input_tokens" /></th>
+            <th onClick={() => onSort('output_tokens')} className="sortable">Output <SortIcon column="output_tokens" /></th>
             <th>Credentials Used</th>
           </tr>
         </thead>
@@ -924,6 +925,8 @@ function ApiKeysTable({ items, onSort, SortIcon, expandedRow, setExpandedRow, on
                 </td>
                 <td className="cred-mono" style={{ color: ak.failure_count > 0 ? '#ef4444' : undefined }}>{ak.failure_count || 0}</td>
                 <td className="cred-mono">{formatNumber(ak.total_tokens)}</td>
+                <td className="cred-mono">{formatNumber(ak.input_tokens || 0)}</td>
+                <td className="cred-mono">{formatNumber(ak.output_tokens || 0)}</td>
                 <td className="cred-mono cred-center">{ak.credentials_used?.length || 0}</td>
               </tr>
             )

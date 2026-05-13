@@ -167,8 +167,8 @@ const CustomTooltip = ({ active, payload, label, isDarkMode, forceCurrency }) =>
 // Custom Label for API Keys chart to show context-aware metrics
 const shortenApiKeyLabel = (key) => {
     const v = String(key || '')
-    if (v.length <= 16) return v
-    return `${v.slice(0, 6)}...${v.slice(-4)}`
+    if (v.length <= 36) return v
+    return `${v.slice(0, 28)}...${v.slice(-5)}`
 }
 
 const ApiKeyLabel = ({ x, y, width, height, value, data, isDarkMode, endpointSort }) => {
@@ -180,11 +180,11 @@ const ApiKeyLabel = ({ x, y, width, height, value, data, isDarkMode, endpointSor
     const costText = `$${(item.cost || 0) < 1 ? (item.cost || 0).toFixed(2) : Math.round(item.cost || 0).toLocaleString('en-US')}`
     const tokenCount = item.tokens || 0
     const requestsCount = item.requests || 0
-    const primaryText = endpointSort === 'cost'
-        ? (tokenCount > 0
+    const primaryText = endpointSort === 'tokens'
+        ? `${tokenCount.toLocaleString()} tokens | ${requestsCount.toLocaleString()} req`
+        : endpointSort === 'cost'
             ? `${costText} | ${tokenCount.toLocaleString()} tokens`
-            : `${costText} | ${requestsCount.toLocaleString()} req`)
-        : `${value.toLocaleString()} req | ${costText}`
+            : `${requestsCount.toLocaleString()} req | ${tokenCount.toLocaleString()} tokens`
 
     return (
         <g>
@@ -626,7 +626,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                     })()
 
                 return {
-                    endpoint: shortenApiKeyLabel(displayName),
+                    endpoint: displayName,
                     endpoint_full: displayName,
                     requests: m.request_count || 0,
                     tokens: m.total_tokens || 0,
@@ -637,6 +637,9 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
 
         if (endpointSort === 'cost') {
             return normalized.sort((a, b) => (b.cost || 0) - (a.cost || 0))
+        }
+        if (endpointSort === 'tokens') {
+            return normalized.sort((a, b) => (b.tokens || 0) - (a.tokens || 0))
         }
         return normalized.sort((a, b) => (b.requests || 0) - (a.requests || 0))
     }, [credentialData, rawEndpointUsage, endpointSort])
@@ -702,7 +705,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                 const md = ep.models[modelName]
                 return {
                     _key: ep.endpoint,
-                    apiKey: ep.endpoint,
+                    apiKey: ep.endpoint_full || ep.endpoint,
                     requests: md.requests || md.request_count || 0,
                     tokens: md.tokens || md.total_tokens || 0,
                     cost: md.cost || md.estimated_cost_usd || 0,
@@ -1647,16 +1650,17 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                         <h3>API Keys ({endpointUsage.length})</h3>
                                         <div className="chart-tabs">
                                             <button className={`tab ${endpointSort === 'requests' ? 'active' : ''}`} onClick={() => setEndpointSort('requests')}>Requests</button>
+                                            <button className={`tab ${endpointSort === 'tokens' ? 'active' : ''}`} onClick={() => setEndpointSort('tokens')}>Tokens</button>
                                             <button className={`tab ${endpointSort === 'cost' ? 'active' : ''}`} onClick={() => setEndpointSort('cost')}>Cost</button>
                                         </div>
                                     </div>
                                     <div className="chart-body chart-body-dark">
                                         {endpointUsage.length > 0 ? (
-                                            <AutoWidthChart height={Math.max(200, endpointUsage.length * 45)}>
-                                                <BarChart data={endpointUsage} layout="vertical" margin={{ left: 10, right: 150 }} onClick={(data) => {
+                                            <AutoWidthChart height={Math.max(260, endpointUsage.length * 58)}>
+                                                <BarChart data={endpointUsage} layout="vertical" margin={{ left: 10, right: 210 }} onClick={(data) => {
                                                     if (data?.activePayload?.[0]?.payload?.models) {
                                                         const point = data.activePayload[0].payload
-                                                        setDrilldownData({ label: point.endpoint, data: point, chartType: 'apikeys' })
+                                                        setDrilldownData({ label: point.endpoint_full || point.endpoint, data: point, chartType: 'apikeys' })
                                                     }
                                                 }}>
                                                     <defs>
@@ -1669,18 +1673,18 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                     <XAxis type="number" stroke={isDarkMode ? '#6e7681' : '#57606a'} tick={CHART_TYPOGRAPHY.axisTick} axisLine={false} tickLine={false} />
                                                     <YAxis
                                                         type="category"
-                                                        dataKey="endpoint"
+                                                        dataKey="endpoint_full"
                                                         stroke={isDarkMode ? '#6e7681' : '#57606a'}
-                                                        tick={CHART_TYPOGRAPHY.axisTick}
-                                                        width={150}
+                                                        tick={{ ...CHART_TYPOGRAPHY.axisTick, fontSize: 11 }}
+                                                        width={290}
                                                         axisLine={false}
                                                         tickLine={false}
                                                         interval={0}
                                                     />
                                                     <Tooltip content={<CustomTooltip isDarkMode={isDarkMode} />} cursor={false} />
                                                     <Bar
-                                                        dataKey={endpointSort === 'cost' ? 'cost' : 'requests'}
-                                                        name={endpointSort === 'cost' ? 'Cost ($)' : 'Requests'}
+                                                        dataKey={endpointSort === 'cost' ? 'cost' : endpointSort === 'tokens' ? 'tokens' : 'requests'}
+                                                        name={endpointSort === 'cost' ? 'Cost ($)' : endpointSort === 'tokens' ? 'Tokens' : 'Requests'}
                                                         fill="url(#gradApiKeys)"
                                                         stroke="#8b5cf6"
                                                         strokeWidth={1}
