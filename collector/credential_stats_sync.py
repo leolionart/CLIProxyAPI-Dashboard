@@ -191,6 +191,34 @@ def _calc_delta(new_val: int, old_val: int) -> int:
     return new_val if delta < 0 else delta
 
 
+def _parse_event_date(value: Any, app_timezone) -> str:
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, (int, float)):
+        raw = float(value)
+        dt = datetime.fromtimestamp(raw / 1000 if raw > 10_000_000_000 else raw, tz=timezone.utc)
+    else:
+        raw = str(value or '').strip()
+        if not raw:
+            dt = datetime.now(timezone.utc)
+        else:
+            normalized = raw.replace('Z', '+00:00') if raw.endswith('Z') else raw
+            try:
+                dt = datetime.fromisoformat(normalized)
+            except ValueError:
+                try:
+                    numeric = float(raw)
+                    dt = datetime.fromtimestamp(
+                        numeric / 1000 if numeric > 10_000_000_000 else numeric,
+                        tz=timezone.utc,
+                    )
+                except Exception:
+                    dt = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(app_timezone).date().isoformat()
+
+
 def _calc_model_deltas(new_models: Dict, old_models: Dict) -> Dict:
     """Calculate deltas for model-level stats within a credential or API key."""
     result = {}
@@ -564,7 +592,7 @@ class CredentialStatsSync:
             "Loaded CPA usage sqlite: %s events, %s API key hash labels",
             usage['total_requests'], len(key_by_hash)
         )
-        return {'usage': usage}
+        return {'usage': usage, '_source': 'cpa_sqlite'}
 
     def fetch_auth_files(self) -> Optional[List[Dict]]:
         """Fetch auth files for credential mapping."""
@@ -871,6 +899,56 @@ class CredentialStatsSync:
             'updated_at': datetime.now(timezone.utc).isoformat(),
         }, on_conflict='stat_date').execute()
 
+    def _usage_by_event_date(self, usage_data: Dict) -> Dict[str, Dict]:
+        usage_by_date: Dict[str, Dict] = {}
+        for api_endpoint, api_data in (usage_data.get('usage', {}).get('apis') or {}).items():
+            if not isinstance(api_data, dict):
+                continue
+            for model_name, model_data in (api_data.get('models') or {}).items():
+                if not isinstance(model_data, dict):
+                    continue
+                for detail in model_data.get('details') or []:
+                    if not isinstance(detail, dict):
+                        continue
+                    stat_date = _parse_event_date(detail.get('timestamp'), self.app_timezone)
+                    day_usage = usage_by_date.setdefault(stat_date, {
+                        'usage': {
+                            'total_requests': 0,
+                            'success_count': 0,
+                            'failure_count': 0,
+                            'total_tokens': 0,
+                            'apis': {},
+                        },
+                        '_source': 'cpa_sqlite',
+                    })['usage']
+                    day_api = day_usage['apis'].setdefault(api_endpoint, {'models': {}})
+                    day_model = day_api['models'].setdefault(model_name, {'details': []})
+                    day_model['details'].append(detail)
+
+                    tokens = detail.get('tokens') or {}
+                    day_usage['total_requests'] += 1
+                    day_usage['total_tokens'] += int(tokens.get('total_tokens') or 0)
+                    if detail.get('failed'):
+                        day_usage['failure_count'] += 1
+                    else:
+                        day_usage['success_count'] += 1
+
+        for day_payload in usage_by_date.values():
+            _normalize_model_totals(day_payload['usage'])
+        return usage_by_date
+
+    def _rebuild_daily_stats_from_sqlite_events(self, usage_data: Dict, auth_files: List[Dict]) -> Dict[str, int]:
+        usage_by_date = self._usage_by_event_date(usage_data)
+        rebuilt = 0
+        for stat_date, day_usage in sorted(usage_by_date.items()):
+            credentials, api_keys = self.aggregate_stats(day_usage, auth_files)
+            self._upsert_daily_stats(stat_date, credentials, api_keys)
+            rebuilt += 1
+        return {
+            'days_rebuilt': rebuilt,
+            'events': sum((payload.get('usage') or {}).get('total_requests', 0) for payload in usage_by_date.values()),
+        }
+
     def sync(self) -> Dict[str, int]:
         """
         Main sync: fetch, aggregate, calculate deltas, store daily + summary.
@@ -895,35 +973,42 @@ class CredentialStatsSync:
             stats['credentials'] = len(credential_stats)
             stats['api_keys'] = len(api_key_stats)
 
-            # --- Delta calculation + daily stats ---
+            # --- Daily stats ---
             try:
-                # 1. Read previous cumulative data
-                prev_creds, prev_keys = self._read_previous_summary()
-
-                # 2. Calculate deltas
-                delta_creds = _calculate_credential_deltas(credential_stats, prev_creds)
-                delta_keys = _calculate_api_key_deltas(api_key_stats, prev_keys)
-
-                if delta_creds or delta_keys:
-                    # 3. Get today's date in app timezone
-                    today_str = datetime.now(self.app_timezone).strftime('%Y-%m-%d')
-
-                    # 4. Read existing today's daily row
-                    existing_creds, existing_keys = self._read_today_daily(today_str)
-
-                    # 5. Merge deltas into existing
-                    merged_creds = _merge_daily_credentials(existing_creds, delta_creds)
-                    merged_keys = _merge_daily_api_keys(existing_keys, delta_keys)
-
-                    # 6. Upsert daily stats
-                    self._upsert_daily_stats(today_str, merged_creds, merged_keys)
-
+                if usage_data.get('_source') == 'cpa_sqlite':
+                    rebuild = self._rebuild_daily_stats_from_sqlite_events(usage_data, auth_files)
                     logger.info(
-                        f"Credential daily stats updated for {today_str}: "
-                        f"{len(delta_creds)} credential deltas, {len(delta_keys)} API key deltas"
+                        "Credential daily stats rebuilt from CPA SQLite: %s days, %s events",
+                        rebuild['days_rebuilt'], rebuild['events']
                     )
                 else:
-                    logger.debug("No credential deltas detected (no new usage)")
+                    # 1. Read previous cumulative data
+                    prev_creds, prev_keys = self._read_previous_summary()
+
+                    # 2. Calculate deltas
+                    delta_creds = _calculate_credential_deltas(credential_stats, prev_creds)
+                    delta_keys = _calculate_api_key_deltas(api_key_stats, prev_keys)
+
+                    if delta_creds or delta_keys:
+                        # 3. Get today's date in app timezone
+                        today_str = datetime.now(self.app_timezone).strftime('%Y-%m-%d')
+
+                        # 4. Read existing today's daily row
+                        existing_creds, existing_keys = self._read_today_daily(today_str)
+
+                        # 5. Merge deltas into existing
+                        merged_creds = _merge_daily_credentials(existing_creds, delta_creds)
+                        merged_keys = _merge_daily_api_keys(existing_keys, delta_keys)
+
+                        # 6. Upsert daily stats
+                        self._upsert_daily_stats(today_str, merged_creds, merged_keys)
+
+                        logger.info(
+                            f"Credential daily stats updated for {today_str}: "
+                            f"{len(delta_creds)} credential deltas, {len(delta_keys)} API key deltas"
+                        )
+                    else:
+                        logger.debug("No credential deltas detected (no new usage)")
 
             except Exception as e:
                 # Daily stats failure should not block summary upsert

@@ -13,7 +13,7 @@ import secrets
 import threading
 from uuid import uuid4
 from datetime import datetime, date, timezone, timedelta
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, Blueprint, request, make_response, Response, g
 from flask_cors import CORS
 from db import PostgreSQLClient
-from credential_stats_sync import sync_credential_stats, normalize_usage_payload
+from credential_stats_sync import CredentialStatsSync, sync_credential_stats, normalize_usage_payload
 from waitress import serve
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -988,19 +988,42 @@ def init_db() -> PostgreSQLClient:
     return PostgreSQLClient(DATABASE_URL)
 
 def fetch_usage_data() -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
-    # (Implementation from before)
+    started = time.time()
+
+    sqlite_syncer = CredentialStatsSync(
+        CLIPROXY_URL,
+        CLIPROXY_MANAGEMENT_KEY,
+        db_client,
+        app_timezone=APP_TIMEZONE,
+        usage_url=CLIPROXY_USAGE_URL,
+    )
+    sqlite_payload = sqlite_syncer.fetch_usage_from_sqlite()
+    if sqlite_payload:
+        sqlite_payload['_source'] = 'cpa_sqlite'
+        duration_ms = int((time.time() - started) * 1000)
+        return sqlite_payload, {
+            'cliproxy_url': CLIPROXY_URL,
+            'cliproxy_usage_url': CLIPROXY_USAGE_URL,
+            'source': 'cpa_sqlite',
+            'cpa_usage_db_path': os.environ.get('CPA_USAGE_DB_PATH') or os.environ.get('CLIPROXY_USAGE_DB_PATH'),
+            'latency_ms': duration_ms,
+            'has_usage': True,
+        }
+
     url = f"{CLIPROXY_USAGE_URL}/v0/management/usage"
     headers = {'Authorization': f'Bearer {CLIPROXY_MANAGEMENT_KEY}'} if CLIPROXY_MANAGEMENT_KEY else {}
-    started = time.time()
     try:
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         raw_payload = response.json()
         payload = normalize_usage_payload(raw_payload)
+        if isinstance(payload, dict):
+            payload.setdefault('_source', 'management_api')
         duration_ms = int((time.time() - started) * 1000)
         meta = {
             'cliproxy_url': CLIPROXY_URL,
             'cliproxy_usage_url': CLIPROXY_USAGE_URL,
+            'source': 'management_api',
             'http_status': response.status_code,
             'latency_ms': duration_ms,
             'payload_bytes': len(response.content or b''),
@@ -1051,11 +1074,172 @@ def calculate_cost(input_tokens: int, output_tokens: int, pricing: Dict[str, flo
     # (Implementation from before)
     return ((input_tokens / 1_000_000) * pricing['input']) + ((output_tokens / 1_000_000) * pricing['output'])
 
+
+def _parse_usage_event_datetime(value: Any) -> datetime:
+    """Parse CPA usage event timestamps into the app timezone."""
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, (int, float)):
+        raw = float(value)
+        # CPA timestamps can be seconds or milliseconds depending on version.
+        dt = datetime.fromtimestamp(raw / 1000 if raw > 10_000_000_000 else raw, tz=timezone.utc)
+    else:
+        raw = str(value or '').strip()
+        if not raw:
+            dt = datetime.now(timezone.utc)
+        else:
+            normalized = raw.replace('Z', '+00:00') if raw.endswith('Z') else raw
+            try:
+                dt = datetime.fromisoformat(normalized)
+            except ValueError:
+                try:
+                    numeric = float(raw)
+                    dt = datetime.fromtimestamp(
+                        numeric / 1000 if numeric > 10_000_000_000 else numeric,
+                        tz=timezone.utc,
+                    )
+                except Exception:
+                    dt = datetime.now(timezone.utc)
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(APP_TIMEZONE)
+
+
+def _iter_usage_details(usage: Dict[str, Any]) -> List[Dict[str, Any]]:
+    events: List[Dict[str, Any]] = []
+    for api_endpoint, api_data in (usage.get('apis') or {}).items():
+        if not isinstance(api_data, dict):
+            continue
+        for model_name, model_data in (api_data.get('models') or {}).items():
+            if not isinstance(model_data, dict):
+                continue
+            for detail in model_data.get('details') or []:
+                if not isinstance(detail, dict):
+                    continue
+                events.append({
+                    'api_endpoint': api_endpoint or 'unknown',
+                    'model_name': model_name or 'unknown',
+                    'detail': detail,
+                })
+    return events
+
+
+def _build_daily_stats_from_usage_events(usage: Dict[str, Any], pricing: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, Any]]:
+    daily: Dict[str, Dict[str, Any]] = {}
+
+    for event in _iter_usage_details(usage):
+        detail = event['detail']
+        tokens = detail.get('tokens') or {}
+        stat_date = _parse_usage_event_datetime(detail.get('timestamp')).date().isoformat()
+        model_name = event['model_name']
+        endpoint = event['api_endpoint']
+        api_key_name = str(detail.get('api_key_name') or detail.get('api_key_hash') or 'unknown').strip() or 'unknown'
+        failed = bool(detail.get('failed'))
+
+        input_tok = int(tokens.get('input_tokens') or 0)
+        output_tok = int(tokens.get('output_tokens') or 0)
+        reasoning_tok = int(tokens.get('reasoning_tokens') or 0)
+        cached_tok = int(tokens.get('cached_tokens') or tokens.get('cache_tokens') or 0)
+        total_tok = int(tokens.get('total_tokens') or 0)
+        model_price, _ = find_pricing_for_model(model_name, pricing)
+        cost = calculate_cost(input_tok, output_tok, model_price)
+
+        row = daily.setdefault(stat_date, {
+            'total_requests': 0,
+            'success_count': 0,
+            'failure_count': 0,
+            'total_tokens': 0,
+            'estimated_cost_usd': 0.0,
+            'breakdown': {'models': {}, 'endpoints': {}, 'api_keys': {}},
+        })
+
+        row['total_requests'] += 1
+        row['success_count'] += 0 if failed else 1
+        row['failure_count'] += 1 if failed else 0
+        row['total_tokens'] += total_tok
+        row['estimated_cost_usd'] += cost
+
+        model_stats = row['breakdown']['models'].setdefault(model_name, {
+            'requests': 0, 'tokens': 0, 'cost': 0.0,
+            'input_tokens': 0, 'output_tokens': 0,
+            'reasoning_tokens': 0, 'cached_tokens': 0,
+        })
+        model_stats['requests'] += 1
+        model_stats['tokens'] += total_tok
+        model_stats['cost'] += cost
+        model_stats['input_tokens'] += input_tok
+        model_stats['output_tokens'] += output_tok
+        model_stats['reasoning_tokens'] += reasoning_tok
+        model_stats['cached_tokens'] += cached_tok
+
+        endpoint_stats = row['breakdown']['endpoints'].setdefault(endpoint, {
+            'requests': 0, 'tokens': 0, 'cost': 0.0, 'models': {},
+        })
+        endpoint_stats['requests'] += 1
+        endpoint_stats['tokens'] += total_tok
+        endpoint_stats['cost'] += cost
+        endpoint_model = endpoint_stats['models'].setdefault(model_name, {
+            'requests': 0, 'tokens': 0, 'cost': 0.0,
+        })
+        endpoint_model['requests'] += 1
+        endpoint_model['tokens'] += total_tok
+        endpoint_model['cost'] += cost
+
+        api_key_stats = row['breakdown']['api_keys'].setdefault(api_key_name, {
+            'requests': 0, 'tokens': 0, 'cost': 0.0,
+            'success': 0, 'failure': 0,
+            'input_tokens': 0, 'output_tokens': 0,
+            'reasoning_tokens': 0, 'cached_tokens': 0,
+            'models': {},
+        })
+        api_key_stats['requests'] += 1
+        api_key_stats['tokens'] += total_tok
+        api_key_stats['cost'] += cost
+        api_key_stats['success'] += 0 if failed else 1
+        api_key_stats['failure'] += 1 if failed else 0
+        api_key_stats['input_tokens'] += input_tok
+        api_key_stats['output_tokens'] += output_tok
+        api_key_stats['reasoning_tokens'] += reasoning_tok
+        api_key_stats['cached_tokens'] += cached_tok
+        api_key_model = api_key_stats['models'].setdefault(model_name, {
+            'requests': 0, 'tokens': 0, 'cost': 0.0,
+        })
+        api_key_model['requests'] += 1
+        api_key_model['tokens'] += total_tok
+        api_key_model['cost'] += cost
+
+    return daily
+
+
+def _upsert_sqlite_event_daily_stats(usage: Dict[str, Any], pricing: Dict[str, Dict[str, float]]) -> Dict[str, Any]:
+    daily = _build_daily_stats_from_usage_events(usage, pricing)
+    for stat_date, row in daily.items():
+        db_client.table('daily_stats').upsert({
+            'stat_date': stat_date,
+            'total_requests': row['total_requests'],
+            'success_count': row['success_count'],
+            'failure_count': row['failure_count'],
+            'total_tokens': row['total_tokens'],
+            'estimated_cost_usd': row['estimated_cost_usd'],
+            'breakdown': row['breakdown'],
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+        }, on_conflict='stat_date').execute()
+
+    return {
+        'days_rebuilt': len(daily),
+        'dates': sorted(daily.keys()),
+        'total_events': sum(row['total_requests'] for row in daily.values()),
+    }
+
+
 def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tuple[bool, Dict[str, Any]]:
     """Store usage data in PostgreSQL database with proper daily delta calculation."""
     if not db_client or not data or 'usage' not in data:
         return False, {'error': 'missing database client or usage payload', 'run_id': run_id}
     usage = data['usage']
+    source = data.get('_source') or 'unknown'
+    use_sqlite_event_rebuild = source == 'cpa_sqlite'
     pricing = get_model_pricing()
     debug_budget = LOG_DEBUG_EVENTS_MAX_PER_SYNC
     debug_dropped = 0
@@ -1128,11 +1312,46 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
             db_client.table('model_usage').insert(model_records).execute()
             db_timings_ms['model_usage_insert'] = int((time.time() - t0) * 1000)
 
-        # Update snapshot cumulative cost
-        cumulative_cost = last_cost_total + total_cost
+        # Update snapshot cumulative cost. CPA SQLite payloads are already a full
+        # event ledger, so total_cost is the true cumulative cost for that DB.
+        cumulative_cost = total_cost if use_sqlite_event_rebuild else last_cost_total + total_cost
         t0 = time.time()
         db_client.table('usage_snapshots').update({'cumulative_cost_usd': cumulative_cost}).eq('id', snapshot_id).execute()
         db_timings_ms['snapshot_cost_update'] = int((time.time() - t0) * 1000)
+
+        if use_sqlite_event_rebuild:
+            t0 = time.time()
+            rebuild_summary = _upsert_sqlite_event_daily_stats(usage, pricing)
+            db_timings_ms['daily_stats_upsert'] = int((time.time() - t0) * 1000)
+            if run_id:
+                _log_sync_event(
+                    run_id=run_id,
+                    source='collector',
+                    category='sync',
+                    severity='info',
+                    title='SQLite daily stats rebuilt',
+                    message='Rebuilt daily_stats directly from CPA SQLite usage_events.',
+                    details={
+                        'snapshot_id': snapshot_id,
+                        'source': source,
+                        'model_rows_inserted': len(model_records),
+                        'db_timings_ms': db_timings_ms,
+                        **rebuild_summary,
+                    },
+                )
+            logger.info(
+                "Stored SQLite snapshot %s and rebuilt %s daily_stats day(s) from %s events",
+                snapshot_id, rebuild_summary['days_rebuilt'], rebuild_summary['total_events']
+            )
+            return True, {
+                'run_id': run_id,
+                'source': source,
+                'snapshot_id': snapshot_id,
+                'model_rows_inserted': len(model_records),
+                'daily_rebuild': rebuild_summary,
+                'db_timings_ms': db_timings_ms,
+                'duration_ms': int((time.time() - started_at) * 1000),
+            }
 
         # === Calculate daily delta stats (Incremental Approach) ===
         # Robust against restarts: Calculate delta since LAST snapshot and add to daily_stats
