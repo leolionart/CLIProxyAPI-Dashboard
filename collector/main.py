@@ -405,6 +405,24 @@ def _current_local_day_bounds_utc() -> tuple[str, str]:
     return start_local.astimezone(timezone.utc).isoformat(), end_local.astimezone(timezone.utc).isoformat()
 
 
+def _skill_stat_date_for_triggered_at(triggered_at: Any) -> str:
+    iso_utc = _to_iso_utc(triggered_at)
+    try:
+        dt = datetime.fromisoformat(str(iso_utc).replace('Z', '+00:00'))
+    except Exception:
+        dt = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(APP_TIMEZONE).date().isoformat()
+
+
+def _skill_day_bounds_utc(stat_date: str) -> tuple[str, str]:
+    day = datetime.strptime(stat_date, '%Y-%m-%d').date()
+    start_local = datetime(day.year, day.month, day.day, tzinfo=APP_TIMEZONE)
+    end_local = start_local + timedelta(days=1)
+    return start_local.astimezone(timezone.utc).isoformat(), end_local.astimezone(timezone.utc).isoformat()
+
+
 def _cleanup_old_app_logs() -> int:
     if not db_client:
         return 0
@@ -826,7 +844,7 @@ def ingest_skill_events():
             continue
 
         if final_is_skeleton is False and merged_tokens_used >= 0:
-            stat_date = str(record['triggered_at'])[:10]
+            stat_date = _skill_stat_date_for_triggered_at(record['triggered_at'])
             daily_keys.add((stat_date, skill_name, machine_id))
 
     for stat_date, skill_name, machine_id in daily_keys:
@@ -1631,6 +1649,7 @@ def _calculate_skill_estimated_cost(model: Any, input_tokens: int, output_tokens
 def _upsert_skill_daily_stats(stat_date: str, skill_name: str, machine_id: str) -> None:
     if not db_client:
         return
+    start_utc, end_utc = _skill_day_bounds_utc(stat_date)
 
     rows = db_client.table('skill_runs').select(
         'tokens_used,output_tokens,duration_ms,tool_calls,status,estimated_cost_usd'
@@ -1638,8 +1657,8 @@ def _upsert_skill_daily_stats(stat_date: str, skill_name: str, machine_id: str) 
         .eq('skill_name', skill_name) \
         .eq('machine_id', machine_id) \
         .eq('is_skeleton', False) \
-        .gte('triggered_at', f'{stat_date}T00:00:00') \
-        .lt('triggered_at', f'{stat_date}T23:59:59') \
+        .gte('triggered_at', start_utc) \
+        .lt('triggered_at', end_utc) \
         .execute().data
 
     if not rows:
