@@ -219,6 +219,8 @@ function App() {
     const [loginError, setLoginError] = useState('')
     const [loginSubmitting, setLoginSubmitting] = useState(false)
     const unauthorizedHandledRef = useRef(false)
+    const credentialStatsInFlightRef = useRef(false)
+    const dashboardDataInFlightRef = useRef(false)
 
     const resetDashboardState = useCallback(() => {
         setStats(null)
@@ -347,6 +349,10 @@ function App() {
             setCredentialLoading(false)
             return
         }
+        if (credentialStatsInFlightRef.current) {
+            return
+        }
+        credentialStatsInFlightRef.current = true
 
         try {
             setCredentialLoading(true)
@@ -510,207 +516,48 @@ function App() {
                 .sort((a, b) => (a.stat_date || '').localeCompare(b.stat_date || ''))
 
             const { startTime, endTime } = getDateBoundaries(rangeId, customRange)
-            let snapshotsRawQuery = supabase
-                .from('usage_snapshots')
-                .select('id, collected_at, raw_data, model_usage(api_endpoint, estimated_cost_usd)')
-                .order('collected_at', { ascending: true })
+            let apiKeyHourlySeries = []
+            let hasHourlyAggregates = false
+            try {
+                let hourlyQuery = supabase
+                    .from('credential_hourly_stats')
+                    .select('bucket_hour, api_keys, total_requests, total_tokens, total_cost_usd')
+                    .order('bucket_hour', { ascending: true })
 
-            if (startTime) snapshotsRawQuery = snapshotsRawQuery.gte('collected_at', startTime)
-            if (endTime) snapshotsRawQuery = snapshotsRawQuery.lt('collected_at', endTime)
+                if (startTime) hourlyQuery = hourlyQuery.gte('bucket_hour', startTime)
+                if (endTime) hourlyQuery = hourlyQuery.lt('bucket_hour', endTime)
 
-            const { data: snapshotsRawRows, error: snapshotsRawError } = await snapshotsRawQuery
-
-            let baselineRaw = null
-            if (startTime) {
-                const { data: baselineRawRows } = await supabase
-                    .from('usage_snapshots')
-                    .select('id, collected_at, raw_data, model_usage(api_endpoint, estimated_cost_usd)')
-                    .lt('collected_at', startTime)
-                    .order('collected_at', { ascending: false })
-                    .limit(1)
-                baselineRaw = baselineRawRows?.[0] || null
-            }
-
-            const readCumulativeApis = (snap) => {
-                const apis = snap?.raw_data?.usage?.apis || {}
-                const out = {}
-                for (const apiData of Object.values(apis)) {
-                    const models = apiData?.models || {}
-                    for (const modelData of Object.values(models)) {
-                        for (const detail of (modelData?.details || [])) {
-                            const apiKeyName = detail?.api_key_name || detail?.api_key_hash || 'unknown'
-                            const tokens = detail?.tokens || {}
-                            if (!out[apiKeyName]) {
-                                out[apiKeyName] = {
-                                    total_requests: 0,
-                                    success_count: 0,
-                                    failure_count: 0,
-                                    input_tokens: 0,
-                                    output_tokens: 0,
-                                    reasoning_tokens: 0,
-                                    cached_tokens: 0,
-                                    total_tokens: 0,
-                                }
-                            }
-                            out[apiKeyName].total_requests += 1
-                            out[apiKeyName].success_count += detail?.failed ? 0 : 1
-                            out[apiKeyName].failure_count += detail?.failed ? 1 : 0
-                            out[apiKeyName].input_tokens += tokens.input_tokens || 0
-                            out[apiKeyName].output_tokens += tokens.output_tokens || 0
-                            out[apiKeyName].reasoning_tokens += tokens.reasoning_tokens || 0
-                            out[apiKeyName].cached_tokens += tokens.cached_tokens || tokens.cache_tokens || 0
-                            out[apiKeyName].total_tokens += tokens.total_tokens || 0
-                        }
-                    }
-                }
-                return out
-            }
-
-            const readCumulativeCostByApi = (snap) => {
-                // Snapshot model_usage is keyed by HTTP endpoint/model, not inbound
-                // API key. Daily SQLite-derived breakdown supplies API-key cost.
-                return {}
-            }
-
-            const mergeHourEntry = (hourMap, hourKey, apiKeyName, delta) => {
-                if (!hourMap[hourKey]) {
-                    hourMap[hourKey] = { total_requests: 0, total_tokens: 0, total_cost: 0, keys: {} }
-                }
-                const hour = hourMap[hourKey]
-                if (!hour.keys[apiKeyName]) {
-                    hour.keys[apiKeyName] = {
-                        api_key_name: apiKeyName,
-                        total_requests: 0,
-                        total_tokens: 0,
-                        success_count: 0,
-                        failure_count: 0,
-                        input_tokens: 0,
-                        output_tokens: 0,
-                        reasoning_tokens: 0,
-                        cached_tokens: 0,
-                        estimated_cost_usd: 0,
-                    }
-                }
-                const keyRow = hour.keys[apiKeyName]
-                keyRow.total_requests += delta.total_requests
-                keyRow.total_tokens += delta.total_tokens
-                keyRow.success_count += delta.success_count
-                keyRow.failure_count += delta.failure_count
-                keyRow.input_tokens += delta.input_tokens
-                keyRow.output_tokens += delta.output_tokens
-                keyRow.reasoning_tokens += delta.reasoning_tokens || 0
-                keyRow.cached_tokens += delta.cached_tokens || 0
-                keyRow.estimated_cost_usd += delta.estimated_cost_usd
-                hour.total_requests += delta.total_requests
-                hour.total_tokens += delta.total_tokens
-                hour.total_cost += delta.estimated_cost_usd
-            }
-
-            const hourMap = {}
-            let prevRaw = baselineRaw
-            if (snapshotsRawRows && snapshotsRawRows.length > 0) {
-                for (const snap of snapshotsRawRows) {
-                    const curr = readCumulativeApis(snap)
-                    const currCost = readCumulativeCostByApi(snap)
-                    if (prevRaw) {
-                        const prev = readCumulativeApis(prevRaw)
-                        const prevCost = readCumulativeCostByApi(prevRaw)
-                        const allKeys = new Set([...Object.keys(prev), ...Object.keys(curr), ...Object.keys(prevCost), ...Object.keys(currCost)])
-                        const dt = new Date(snap.collected_at)
-                        const hourBucket = `${dt.toLocaleDateString('en-CA')} ${dt.getHours().toString().padStart(2, '0')}:00`
-
-                        for (const apiKeyName of allKeys) {
-                            const p = prev[apiKeyName] || {
-                                total_requests: 0,
-                                total_tokens: 0,
-                                success_count: 0,
-                                failure_count: 0,
-                                input_tokens: 0,
-                                output_tokens: 0,
-                                reasoning_tokens: 0,
-                                cached_tokens: 0,
-                            }
-                            const c = curr[apiKeyName] || {
-                                total_requests: 0,
-                                total_tokens: 0,
-                                success_count: 0,
-                                failure_count: 0,
-                                input_tokens: 0,
-                                output_tokens: 0,
-                                reasoning_tokens: 0,
-                                cached_tokens: 0,
-                            }
-
-                            let delta = {
-                                total_requests: c.total_requests - p.total_requests,
-                                total_tokens: c.total_tokens - p.total_tokens,
-                                success_count: c.success_count - p.success_count,
-                                failure_count: c.failure_count - p.failure_count,
-                                input_tokens: c.input_tokens - p.input_tokens,
-                                output_tokens: c.output_tokens - p.output_tokens,
-                                reasoning_tokens: c.reasoning_tokens - p.reasoning_tokens,
-                                cached_tokens: c.cached_tokens - p.cached_tokens,
-                                estimated_cost_usd: (currCost[apiKeyName] || 0) - (prevCost[apiKeyName] || 0),
-                            }
-
-                            if (delta.total_requests < 0 || delta.total_tokens < 0 || delta.success_count < 0 || delta.failure_count < 0 || delta.estimated_cost_usd < 0) {
-                                delta = {
-                                    total_requests: c.total_requests,
-                                    total_tokens: c.total_tokens,
-                                    success_count: c.success_count,
-                                    failure_count: c.failure_count,
-                                    input_tokens: c.input_tokens,
-                                    output_tokens: c.output_tokens,
-                                    reasoning_tokens: c.reasoning_tokens,
-                                    cached_tokens: c.cached_tokens,
-                                    estimated_cost_usd: currCost[apiKeyName] || 0,
-                                }
-                            }
-
-                            delta.total_requests = Math.max(0, delta.total_requests)
-                            delta.total_tokens = Math.max(0, delta.total_tokens)
-                            delta.success_count = Math.max(0, delta.success_count)
-                            delta.failure_count = Math.max(0, delta.failure_count)
-                            delta.input_tokens = Math.max(0, delta.input_tokens)
-                            delta.output_tokens = Math.max(0, delta.output_tokens)
-                            delta.reasoning_tokens = Math.max(0, delta.reasoning_tokens || 0)
-                            delta.cached_tokens = Math.max(0, delta.cached_tokens || 0)
-                            delta.estimated_cost_usd = Math.max(0, delta.estimated_cost_usd)
-
-                            if (delta.total_requests > 0 || delta.total_tokens > 0 || delta.estimated_cost_usd > 0) {
-                                mergeHourEntry(hourMap, hourBucket, apiKeyName, delta)
-                            }
-                        }
-                    }
-                    prevRaw = snap
-                }
-            }
-
-            const apiKeyHourlySeries = Object.entries(hourMap)
-                .map(([hour, data]) => {
-                    const keys = Object.values(data.keys)
-                        .map((k) => ({
+                const { data: hourlyRows, error: hourlyError } = await hourlyQuery
+                if (!hourlyError) {
+                    hasHourlyAggregates = true
+                    apiKeyHourlySeries = (hourlyRows || []).map((row) => {
+                        const dt = new Date(row.bucket_hour)
+                        const hour = `${dt.toLocaleDateString('en-CA')} ${dt.getHours().toString().padStart(2, '0')}:00`
+                        const keys = (row.api_keys || []).map((k) => ({
                             ...k,
-                            success_rate: k.total_requests > 0
-                                ? Math.round((k.success_count / k.total_requests) * 1000) / 10
-                                : 0,
+                            api_key_name: k.api_key_name || 'unknown',
+                            total_requests: k.total_requests || 0,
+                            total_tokens: k.total_tokens || 0,
+                            estimated_cost_usd: k.estimated_cost_usd || 0,
                         }))
-                        .sort((a, b) => b.total_requests - a.total_requests)
-                    return {
-                        hour,
-                        total_requests: data.total_requests,
-                        total_tokens: data.total_tokens,
-                        total_cost: data.total_cost || 0,
-                        keys,
-                    }
-                })
-                .sort((a, b) => a.hour.localeCompare(b.hour))
+                        return {
+                            hour,
+                            total_requests: row.total_requests || 0,
+                            total_tokens: row.total_tokens || 0,
+                            total_cost: Number(row.total_cost_usd || 0),
+                            keys,
+                        }
+                    })
+                }
+            } catch (hourlyErr) {
+                console.debug('credential_hourly_stats not available:', hourlyErr.message)
+            }
 
             setCredentialTimeSeries({
                 byDay: apiKeyDailySeries,
                 byHour: apiKeyHourlySeries,
                 meta: {
-                    hasRawSnapshots: !snapshotsRawError,
+                    hasRawSnapshots: hasHourlyAggregates,
                     hasHourlyData: apiKeyHourlySeries.length > 0,
                     rangeId,
                 },
@@ -738,6 +585,7 @@ function App() {
             console.error('Error fetching credential stats:', err)
             setCredentialTimeSeries({ byDay: [], byHour: [], meta: { hasRawSnapshots: false, hasHourlyData: false, rangeId } })
         } finally {
+            credentialStatsInFlightRef.current = false
             setCredentialLoading(false)
         }
     }, [authState.authenticated, customRange, dateRange])
@@ -746,6 +594,10 @@ function App() {
         if (!authState.authenticated) {
             return
         }
+        if (dashboardDataInFlightRef.current) {
+            return
+        }
+        dashboardDataInFlightRef.current = true
 
         const shouldShowInitialLoading = isInitial && !hasInitialDataLoaded
 
@@ -757,10 +609,14 @@ function App() {
             }
 
             const { startTime, endTime, startDate, endDate } = getDateBoundaries(rangeId, customRange)
+            const isCustomSingleDay = rangeId === 'custom'
+                && customRange?.startDate
+                && customRange.startDate === customRange.endDate
+            const shouldFetchSnapshotSeries = rangeId === 'today' || rangeId === 'yesterday' || isCustomSingleDay
 
             const { data: latestSnapshots } = await supabase
                 .from('usage_snapshots')
-                .select('*')
+                .select('id, collected_at, total_requests, success_count, failure_count, total_tokens, cumulative_cost_usd')
                 .order('collected_at', { ascending: false })
                 .limit(1)
 
@@ -769,22 +625,26 @@ function App() {
                 setLastUpdated(new Date(latestSnapshots[0].collected_at))
             }
 
-            let snapshotsQuery = supabase
-                .from('usage_snapshots')
-                .select('id, collected_at, total_requests, success_count, failure_count, total_tokens, raw_data, model_usage(model_name, request_count, total_tokens, estimated_cost_usd, input_tokens, output_tokens, reasoning_tokens, cached_tokens)')
-                .order('collected_at', { ascending: true })
+            let snapshotsData = []
+            if (shouldFetchSnapshotSeries) {
+                let snapshotsQuery = supabase
+                    .from('usage_snapshots')
+                    .select('id, collected_at, total_requests, success_count, failure_count, total_tokens, model_usage(model_name, request_count, total_tokens, estimated_cost_usd, input_tokens, output_tokens, reasoning_tokens, cached_tokens)')
+                    .order('collected_at', { ascending: true })
 
-            if (startTime) {
-                snapshotsQuery = snapshotsQuery.gte('collected_at', startTime)
-            }
-            if (endTime) {
-                snapshotsQuery = snapshotsQuery.lt('collected_at', endTime)
-            }
+                if (startTime) {
+                    snapshotsQuery = snapshotsQuery.gte('collected_at', startTime)
+                }
+                if (endTime) {
+                    snapshotsQuery = snapshotsQuery.lt('collected_at', endTime)
+                }
 
-            const { data: snapshotsData } = await snapshotsQuery
+                const { data } = await snapshotsQuery
+                snapshotsData = data || []
+            }
 
             let baselineSnapshot = null
-            if (startTime && snapshotsData?.length > 0) {
+            if (shouldFetchSnapshotSeries && startTime && snapshotsData.length > 0) {
                 const { data: baselineData } = await supabase
                     .from('usage_snapshots')
                     .select('id, collected_at, total_requests, success_count, failure_count, total_tokens, model_usage(model_name, request_count, total_tokens, estimated_cost_usd)')
@@ -1280,6 +1140,8 @@ function App() {
             console.error('Error fetching data:', error)
             setLoading(false)
             setIsRefreshing(false)
+        } finally {
+            dashboardDataInFlightRef.current = false
         }
     }, [authState.authenticated, customRange, dateRange, hasInitialDataLoaded])
 

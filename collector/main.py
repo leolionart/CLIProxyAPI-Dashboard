@@ -1233,6 +1233,104 @@ def _upsert_sqlite_event_daily_stats(usage: Dict[str, Any], pricing: Dict[str, D
     }
 
 
+def _build_credential_hourly_stats_from_usage_events(usage: Dict[str, Any], pricing: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, Any]]:
+    hourly: Dict[str, Dict[str, Any]] = {}
+
+    for event in _iter_usage_details(usage):
+        detail = event['detail']
+        tokens = detail.get('tokens') or {}
+        event_dt = _parse_usage_event_datetime(detail.get('timestamp'))
+        bucket_local = event_dt.replace(minute=0, second=0, microsecond=0)
+        bucket_utc = bucket_local.astimezone(timezone.utc).isoformat()
+        model_name = event['model_name']
+        api_key_name = str(detail.get('api_key_name') or detail.get('api_key_hash') or 'unknown').strip() or 'unknown'
+        failed = bool(detail.get('failed'))
+
+        input_tok = int(tokens.get('input_tokens') or 0)
+        output_tok = int(tokens.get('output_tokens') or 0)
+        reasoning_tok = int(tokens.get('reasoning_tokens') or 0)
+        cached_tok = int(tokens.get('cached_tokens') or tokens.get('cache_tokens') or 0)
+        total_tok = int(tokens.get('total_tokens') or 0)
+        model_price, _ = find_pricing_for_model(model_name, pricing)
+        cost = calculate_cost(input_tok, output_tok, model_price)
+
+        row = hourly.setdefault(bucket_utc, {
+            'total_requests': 0,
+            'total_tokens': 0,
+            'total_cost_usd': 0.0,
+            'api_keys': {},
+        })
+        row['total_requests'] += 1
+        row['total_tokens'] += total_tok
+        row['total_cost_usd'] += cost
+
+        api_key_stats = row['api_keys'].setdefault(api_key_name, {
+            'api_key_name': api_key_name,
+            'total_requests': 0,
+            'total_tokens': 0,
+            'success_count': 0,
+            'failure_count': 0,
+            'input_tokens': 0,
+            'output_tokens': 0,
+            'reasoning_tokens': 0,
+            'cached_tokens': 0,
+            'estimated_cost_usd': 0.0,
+            'models': {},
+        })
+        api_key_stats['total_requests'] += 1
+        api_key_stats['total_tokens'] += total_tok
+        api_key_stats['success_count'] += 0 if failed else 1
+        api_key_stats['failure_count'] += 1 if failed else 0
+        api_key_stats['input_tokens'] += input_tok
+        api_key_stats['output_tokens'] += output_tok
+        api_key_stats['reasoning_tokens'] += reasoning_tok
+        api_key_stats['cached_tokens'] += cached_tok
+        api_key_stats['estimated_cost_usd'] += cost
+
+        model_stats = api_key_stats['models'].setdefault(model_name, {
+            'requests': 0,
+            'tokens': 0,
+            'cost': 0.0,
+            'success': 0,
+            'failure': 0,
+        })
+        model_stats['requests'] += 1
+        model_stats['tokens'] += total_tok
+        model_stats['cost'] += cost
+        model_stats['success'] += 0 if failed else 1
+        model_stats['failure'] += 1 if failed else 0
+
+    return hourly
+
+
+def _upsert_credential_hourly_stats(usage: Dict[str, Any], pricing: Dict[str, Dict[str, float]]) -> Dict[str, Any]:
+    hourly = _build_credential_hourly_stats_from_usage_events(usage, pricing)
+    for bucket_hour, row in hourly.items():
+        api_keys = []
+        for api_key in row['api_keys'].values():
+            total_requests = int(api_key.get('total_requests') or 0)
+            api_keys.append({
+                **api_key,
+                'estimated_cost_usd': round(float(api_key.get('estimated_cost_usd') or 0), 6),
+                'success_rate': round((int(api_key.get('success_count') or 0) / total_requests) * 100, 1) if total_requests else 0,
+            })
+        api_keys.sort(key=lambda item: item.get('total_requests') or 0, reverse=True)
+
+        db_client.table('credential_hourly_stats').upsert({
+            'bucket_hour': bucket_hour,
+            'api_keys': api_keys,
+            'total_requests': row['total_requests'],
+            'total_tokens': row['total_tokens'],
+            'total_cost_usd': round(float(row['total_cost_usd'] or 0), 6),
+            'updated_at': datetime.now(timezone.utc).isoformat(),
+        }, on_conflict='bucket_hour').execute()
+
+    return {
+        'hours_rebuilt': len(hourly),
+        'total_events': sum(row['total_requests'] for row in hourly.values()),
+    }
+
+
 def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tuple[bool, Dict[str, Any]]:
     """Store usage data in PostgreSQL database with proper daily delta calculation."""
     if not db_client or not data or 'usage' not in data:
@@ -1252,6 +1350,7 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
             'model_usage_insert': 0,
             'snapshot_cost_update': 0,
             'daily_stats_upsert': 0,
+            'credential_hourly_stats_upsert': 0,
         }
 
         # Current cumulative values from CLIProxy
@@ -1323,6 +1422,9 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
             t0 = time.time()
             rebuild_summary = _upsert_sqlite_event_daily_stats(usage, pricing)
             db_timings_ms['daily_stats_upsert'] = int((time.time() - t0) * 1000)
+            t0 = time.time()
+            hourly_summary = _upsert_credential_hourly_stats(usage, pricing)
+            db_timings_ms['credential_hourly_stats_upsert'] = int((time.time() - t0) * 1000)
             if run_id:
                 _log_sync_event(
                     run_id=run_id,
@@ -1337,11 +1439,15 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
                         'model_rows_inserted': len(model_records),
                         'db_timings_ms': db_timings_ms,
                         **rebuild_summary,
+                        **hourly_summary,
                     },
                 )
             logger.info(
-                "Stored SQLite snapshot %s and rebuilt %s daily_stats day(s) from %s events",
-                snapshot_id, rebuild_summary['days_rebuilt'], rebuild_summary['total_events']
+                "Stored SQLite snapshot %s and rebuilt %s daily_stats day(s), %s credential_hourly_stats hour(s) from %s events",
+                snapshot_id,
+                rebuild_summary['days_rebuilt'],
+                hourly_summary['hours_rebuilt'],
+                rebuild_summary['total_events'],
             )
             return True, {
                 'run_id': run_id,
@@ -1349,6 +1455,7 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
                 'snapshot_id': snapshot_id,
                 'model_rows_inserted': len(model_records),
                 'daily_rebuild': rebuild_summary,
+                'credential_hourly_rebuild': hourly_summary,
                 'db_timings_ms': db_timings_ms,
                 'duration_ms': int((time.time() - started_at) * 1000),
             }

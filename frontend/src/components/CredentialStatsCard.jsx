@@ -707,7 +707,7 @@ export default function CredentialStatsCard({ onRowClick, data, timeSeries, date
               )}
               {!hasRawSnapshots ? (
                 <div className="cred-time-empty">
-                  Hourly view needs usage snapshots with raw_data. Overview and By Day are still available.
+                  Hourly view is disabled until hourly API-key aggregates are available. Overview and By Day are still available.
                 </div>
               ) : (
                 <ApiKeyTimeSeriesChart
