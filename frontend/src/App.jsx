@@ -214,7 +214,7 @@ const getDateBoundaries = (rangeId, customRange) => {
 }
 
 function App() {
-    const [authState, setAuthState] = useState({ loading: true, authenticated: false, expiresAt: null, rememberMe: false })
+    const [authState, setAuthState] = useState({ loading: true, authenticated: false, authRequired: false, expiresAt: null, rememberMe: false })
     const [loginForm, setLoginForm] = useState({ password: '', rememberMe: true })
     const [loginError, setLoginError] = useState('')
     const [loginSubmitting, setLoginSubmitting] = useState(false)
@@ -245,7 +245,13 @@ function App() {
         if (unauthorizedHandledRef.current) return
         unauthorizedHandledRef.current = true
         resetDashboardState()
-        setAuthState({ loading: false, authenticated: false, expiresAt: null, rememberMe: false })
+        setAuthState(prev => ({
+            loading: false,
+            authenticated: !prev.authRequired,
+            authRequired: prev.authRequired,
+            expiresAt: null,
+            rememberMe: false,
+        }))
         setLoginForm(prev => ({ ...prev, password: '' }))
         setLoginError('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
     }, [resetDashboardState])
@@ -317,29 +323,32 @@ function App() {
     const fetchSession = useCallback(async () => {
         if (DEV_BYPASS_AUTH) {
             unauthorizedHandledRef.current = false
-            setAuthState({ loading: false, authenticated: true, expiresAt: null, rememberMe: true })
+            setAuthState({ loading: false, authenticated: true, authRequired: false, expiresAt: null, rememberMe: true })
             return true
         }
 
         try {
             const response = await authFetch(`${COLLECTOR_BASE}/auth/session`, { method: 'GET', skipUnauthorized: true })
             if (!response.ok) {
-                setAuthState({ loading: false, authenticated: false, expiresAt: null, rememberMe: false })
+                setAuthState({ loading: false, authenticated: false, authRequired: true, expiresAt: null, rememberMe: false })
                 return false
             }
 
             const session = await response.json()
+            const authRequired = Boolean(session.auth_required)
+            const authenticated = !authRequired || Boolean(session.authenticated)
             unauthorizedHandledRef.current = false
             setAuthState({
                 loading: false,
-                authenticated: Boolean(session.authenticated),
+                authenticated,
+                authRequired,
                 expiresAt: session.expires_at || null,
                 rememberMe: Boolean(session.remember_me),
             })
-            return Boolean(session.authenticated)
+            return authenticated
         } catch (error) {
             console.error('Error fetching session:', error)
-            setAuthState({ loading: false, authenticated: false, expiresAt: null, rememberMe: false })
+            setAuthState({ loading: false, authenticated: false, authRequired: true, expiresAt: null, rememberMe: false })
             return false
         }
     }, [authFetch])
@@ -1250,7 +1259,7 @@ function App() {
 
         if (DEV_BYPASS_AUTH) {
             unauthorizedHandledRef.current = false
-            setAuthState({ loading: false, authenticated: true, expiresAt: null, rememberMe: true })
+            setAuthState({ loading: false, authenticated: true, authRequired: false, expiresAt: null, rememberMe: true })
             setLoginError('')
             return
         }
@@ -1272,10 +1281,13 @@ function App() {
             }
 
             const session = await response.json()
+            const authRequired = Boolean(session.auth_required)
+            const authenticated = !authRequired || Boolean(session.authenticated)
             unauthorizedHandledRef.current = false
             setAuthState({
                 loading: false,
-                authenticated: Boolean(session.authenticated),
+                authenticated,
+                authRequired,
                 expiresAt: session.expires_at || null,
                 rememberMe: Boolean(session.remember_me),
             })
@@ -1297,7 +1309,13 @@ function App() {
         } finally {
             unauthorizedHandledRef.current = false
             resetDashboardState()
-            setAuthState({ loading: false, authenticated: false, expiresAt: null, rememberMe: false })
+            setAuthState(prev => ({
+                loading: false,
+                authenticated: !prev.authRequired,
+                authRequired: prev.authRequired,
+                expiresAt: null,
+                rememberMe: false,
+            }))
             setLoginForm(prev => ({ ...prev, password: '' }))
             setLoginError('')
         }
@@ -1317,7 +1335,7 @@ function App() {
         )
     }
 
-    if (!authState.authenticated) {
+    if (authState.authRequired && !authState.authenticated) {
         return (
             <div className="dashboard auth-screen">
                 <div className="auth-shell">
@@ -1392,7 +1410,7 @@ function App() {
                 skillDailyStats={mockSkillData.skillDailyStats}
                 appLogs={appLogs}
                 onClearAllLogs={clearAllAppLogs}
-                onLogout={handleLogout}
+                onLogout={authState.authRequired ? handleLogout : undefined}
             />
         </div>
     )

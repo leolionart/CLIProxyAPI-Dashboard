@@ -84,18 +84,19 @@ CLIPROXY_URL=http://host.docker.internal:8317
 # Optional: set this to CPA-Manager Usage Service for CLIProxyAPI v6.10+ / v7.
 CLIPROXY_USAGE_URL=http://host.docker.internal:18317
 CLIPROXY_MANAGEMENT_KEY=<your-management-secret>
-ADMIN_PASSWORD=change-me
 
 # Optional
 COLLECTOR_INTERVAL_SECONDS=300
 TIMEZONE_OFFSET_HOURS=7
+ADMIN_AUTH_REQUIRED=false
+ADMIN_PASSWORD=change-me
 ADMIN_SESSION_TTL_DAYS=30
 ADMIN_SESSION_SECURE_COOKIE=false
 ADMIN_SESSION_SAMESITE=Lax
 ```
 
 Notes:
-- Dashboard now requires admin login before loading UI or `/rest/v1/*` data.
+- Dashboard is public by default. Set `ADMIN_AUTH_REQUIRED=true` and `ADMIN_PASSWORD=...` to require admin login before loading UI or `/rest/v1/*` data.
 - The browser stores only an `HttpOnly` session cookie; the password is never stored in browser storage.
 - If you deploy behind HTTPS, set `ADMIN_SESSION_SECURE_COOKIE=true`.
 - Default host port for PostgREST is now `8418` to avoid common conflicts on `3000`. Override with `POSTGREST_HOST_PORT` if needed.
@@ -359,6 +360,7 @@ python main.py
 
 ### Login does not work
 
+- Ensure `.env` has `ADMIN_AUTH_REQUIRED=true`
 - Ensure `.env` contains `ADMIN_PASSWORD` and that it matches what you enter on the login screen
 - For HTTPS deployments, set `ADMIN_SESSION_SECURE_COOKIE=true`; for local HTTP keep it `false`
 - If you use a custom origin or reverse proxy, set `ADMIN_ALLOWED_ORIGINS` to the public dashboard origin

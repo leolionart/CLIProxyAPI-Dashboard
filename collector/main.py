@@ -65,6 +65,7 @@ CREDENTIAL_SYNC_INTERVAL = _env_int('CREDENTIAL_SYNC_INTERVAL_SECONDS', COLLECTO
 APP_LOG_CLEANUP_INTERVAL_MINUTES = _env_int('APP_LOG_CLEANUP_INTERVAL_MINUTES', 30)
 TRIGGER_PORT = _env_int('COLLECTOR_TRIGGER_PORT', 5001)
 
+ADMIN_AUTH_REQUIRED = str(os.getenv('ADMIN_AUTH_REQUIRED', 'false')).strip().lower() in {'1', 'true', 'yes', 'on'}
 ADMIN_PASSWORD = str(os.getenv('ADMIN_PASSWORD', '')).strip()
 ADMIN_SESSION_COOKIE_NAME = str(os.getenv('ADMIN_SESSION_COOKIE_NAME', 'cliproxy_admin_session')).strip() or 'cliproxy_admin_session'
 ADMIN_SESSION_TTL_DAYS = _env_int('ADMIN_SESSION_TTL_DAYS', 30)
@@ -306,9 +307,12 @@ def _revoke_session(session_row: Optional[Dict[str, Any]]) -> None:
 
 
 def _session_payload(session_row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not ADMIN_AUTH_REQUIRED:
+        return {'auth_required': False, 'authenticated': True}
     if not session_row:
-        return {'authenticated': False}
+        return {'auth_required': True, 'authenticated': False}
     return {
+        'auth_required': True,
         'authenticated': True,
         'remember_me': bool(session_row.get('remember_me')),
         'expires_at': session_row.get('expires_at'),
@@ -317,6 +321,8 @@ def _session_payload(session_row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _require_admin_session() -> Optional[Response]:
+    if not ADMIN_AUTH_REQUIRED:
+        return None
     session_row = _get_authenticated_session()
     if not session_row:
         return jsonify({'error': 'authentication required'}), 401
@@ -508,6 +514,9 @@ def health_check():
 
 @api_bp.route('/auth/login', methods=['POST'])
 def auth_login():
+    if not ADMIN_AUTH_REQUIRED:
+        return jsonify(_session_payload(None))
+
     if not db_client:
         return jsonify({'error': 'database not initialized'}), 500
 
@@ -569,6 +578,9 @@ def auth_logout():
 
 @api_bp.route('/auth/verify', methods=['GET'])
 def auth_verify():
+    if not ADMIN_AUTH_REQUIRED:
+        return make_response('', 204)
+
     session_row = _get_authenticated_session()
     if not session_row:
         response = make_response('', 401)
