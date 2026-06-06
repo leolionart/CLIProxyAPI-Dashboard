@@ -150,3 +150,17 @@ Chỉ được đóng incident khi đủ tất cả:
 - [ ] API trả dữ liệu mới.
 - [ ] UI phản ánh đúng model/key mới.
 - [ ] Đã ghi nhận nguyên nhân gốc + migration đã merge/push.
+
+---
+
+## 9) Release notes on push
+
+- Khi push thay đổi user-facing, deployable, hoặc thay đổi hành vi, phải có
+  release notes/changelog trong cùng commit range nếu có thể.
+- Repo dùng shared pre-push hook ở
+  `/Volumes/DATA/Coding Projects/.codex-tools/git-hooks`. Nếu push thiếu
+  release notes, hook sẽ tự sinh release notes, commit `Add release notes`, và
+  tự push branch đã cập nhật.
+- Release note paths hợp lệ: `CHANGELOG.md`, `Changelog.md`, `changelog.md`,
+  `RELEASE_NOTES.md`, `RELEASE-NOTES.md`, `docs/releases/*.md`,
+  `docs/release-notes/*.md`.
