@@ -40,26 +40,17 @@ services:
 
   # ── Collector: polls CLIProxy, writes to postgres ───────────
   collector:
-    image: ghcr.io/leolionart/cliproxy-collector:latest
+    image: cliproxy-collector:skill-tz-20260513-v1
     platform: linux/amd64
     container_name: cliproxy-collector
     environment:
       DATABASE_URL: postgres://cliproxy:${DB_PASSWORD}@postgres:5432/cliproxy
       CLIPROXY_URL: ${CLIPROXY_URL:-http://host.docker.internal:8317}
       CLIPROXY_USAGE_URL: ${CLIPROXY_USAGE_URL:-}
-<<<<<<< HEAD
-      CPA_USAGE_DB_PATH: ${CPA_USAGE_DB_PATH:-/cpa-data/usage.sqlite}
-=======
-      CPA_USAGE_DB_PATH: /cpa-data/usage.sqlite
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
       CLIPROXY_MANAGEMENT_KEY: ${CLIPROXY_MANAGEMENT_KEY}
       COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-300}
       COLLECTOR_TRIGGER_PORT: 5001
       TIMEZONE_OFFSET_HOURS: ${TIMEZONE_OFFSET_HOURS:-7}
-<<<<<<< HEAD
-      ADMIN_AUTH_REQUIRED: ${ADMIN_AUTH_REQUIRED:-false}
-=======
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       ADMIN_SESSION_TTL_DAYS: ${ADMIN_SESSION_TTL_DAYS:-30}
       ADMIN_SESSION_COOKIE_NAME: ${ADMIN_SESSION_COOKIE_NAME:-cliproxy_admin_session}
@@ -68,12 +59,6 @@ services:
       ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    volumes:
-<<<<<<< HEAD
-      - ${CPA_USAGE_DATA_DIR:-./cpa-data}:${CPA_USAGE_MOUNT_DIR:-/cpa-data}:ro
-=======
-      - /var/lib/docker/volumes/cli-proxy-api_cpa_manager_data/_data:/cpa-data:ro
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/api/collector/health')"]
       interval: 30s
@@ -89,7 +74,7 @@ services:
 
   # ── Frontend: nginx proxies /rest/v1 → postgrest, /api → collector
   frontend:
-    image: ghcr.io/leolionart/cliproxy-dashboard:latest
+    image: cliproxy-dashboard:credential-usage-20260513-v1
     platform: linux/amd64
     container_name: cliproxy-dashboard
     ports:

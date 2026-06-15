@@ -439,11 +439,8 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return normalized.sort((a, b) => (b.requests || 0) - (a.requests || 0))
     }, [credentialData, rawEndpointUsage, endpointSort])
 
-<<<<<<< HEAD
-=======
     const apiKeyTotalCost = endpointUsage.reduce((sum, key) => sum + (key.cost || key.estimated_cost_usd || 0), 0)
 
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
     const formatDateLabel = (value) => value ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
     const formatISODate = (dateObj) => {
         if (!dateObj) return null
@@ -642,17 +639,8 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
     // Token Type Time-Series: clustered stacked by time, 4 groups per point, stacks = API keys
     // Hourly for today/yesterday, daily for multi-day ranges
     const { tokenTrendData, tokenTrendModels, tokenTrendTotals } = useMemo(() => {
-        const hasTokenBreakdown = (rows) => (rows || []).some(point =>
-            Object.values(point.api_keys || point.models || {}).some(d =>
-                (d.input_tokens || 0) > 0 ||
-                (d.output_tokens || 0) > 0 ||
-                (d.reasoning_tokens || 0) > 0 ||
-                (d.cached_tokens || 0) > 0
-            )
-        )
-        const wantsHourly = ['today', 'yesterday'].includes(dateRange)
-        const useHourly = wantsHourly && hasTokenBreakdown(hourlyStats)
-        const sourceData = useHourly ? hourlyStats : dailyStats
+        const isHourly = ['today', 'yesterday'].includes(dateRange)
+        const sourceData = isHourly ? hourlyStats : dailyStats
 
         // Find top API keys + accumulate per-type totals from same source as chart
         const modelTotals = {}
@@ -675,7 +663,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             .map(([name]) => name)
 
         const data = (sourceData || []).map(point => {
-            const timeLabel = useHourly
+            const timeLabel = isHourly
                 ? point.time
                 : (point.stat_date || '').slice(5) // YYYY-MM-DD → MM-DD
             const row = { time: timeLabel }
@@ -695,63 +683,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
     const sparklineData = hourlyChartData.slice(-12)
     const costSparkline = dailyChartData.length >= 2 ? dailyChartData : [...Array(7)].map((_, i) => ({ cost: i === 6 ? totalCost : totalCost * (i * 0.1) }))
 
-<<<<<<< HEAD
-    // Cost breakdown datasets: Cost Analysis is intentionally grouped by AI model.
-    const costBreakdownAllBase = useMemo(() => {
-        const modelRows = filteredModelUsage.length > 0
-            ? filteredModelUsage
-            : Object.values((endpointUsage || []).reduce((acc, apiKey) => {
-                for (const [modelName, modelData] of Object.entries(apiKey.models || {})) {
-                    if (!acc[modelName]) {
-                        acc[modelName] = {
-                            model_name: modelName,
-                            request_count: 0,
-                            input_tokens: 0,
-                            output_tokens: 0,
-                            reasoning_tokens: 0,
-                            cached_tokens: 0,
-                            total_tokens: 0,
-                            estimated_cost_usd: 0,
-                        }
-                    }
-                    acc[modelName].request_count += modelData.requests || modelData.request_count || 0
-                    acc[modelName].input_tokens += modelData.input_tokens || 0
-                    acc[modelName].output_tokens += modelData.output_tokens || 0
-                    acc[modelName].reasoning_tokens += modelData.reasoning_tokens || 0
-                    acc[modelName].cached_tokens += modelData.cached_tokens || 0
-                    acc[modelName].total_tokens += modelData.tokens || modelData.total_tokens || 0
-                    acc[modelName].estimated_cost_usd += modelData.cost || modelData.estimated_cost_usd || 0
-                }
-                return acc
-            }, {}))
-
-        const denominator = totalCost || modelRows.reduce((sum, m) => sum + (m.estimated_cost_usd || 0), 0)
-        return modelRows.map((m) => {
-            const modelName = m.model_name || m.model || 'unknown'
-            const cost = m.estimated_cost_usd || m.cost || 0
-            return {
-                ...m,
-                model_name: modelName,
-                request_count: m.requests || m.request_count || 0,
-                input_tokens: m.input_tokens || 0,
-                output_tokens: m.output_tokens || 0,
-                reasoning_tokens: m.reasoning_tokens || 0,
-                cached_tokens: m.cached_tokens || 0,
-                total_tokens: m.tokens || m.total_tokens || 0,
-                estimated_cost_usd: cost,
-                percentage: denominator > 0 ? Number(((cost / denominator) * 100).toFixed(0)) : 0,
-                color: getModelColor(modelName)
-            }
-        })
-    }, [filteredModelUsage, endpointUsage, totalCost])
-
-    // Chart/legend shows the top AI models by cost.
-    const costLegend = useMemo(() => {
-        return costBreakdownAllBase
-            .sort((a, b) => (b.estimated_cost_usd || 0) - (a.estimated_cost_usd || 0))
-            .slice(0, 10)
-    }, [costBreakdownAllBase])
-=======
     // Cost breakdown datasets
     const topModelSet = useMemo(() => new Set(activeTopModels), [activeTopModels])
 
@@ -775,7 +706,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             .filter(m => topModelSet.has(m.model_name))
             .sort((a, b) => (b.estimated_cost_usd || 0) - (a.estimated_cost_usd || 0))
     }, [costBreakdownAllBase, topModelSet])
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
 
     // Table sorting honors user-selected column/direction
     const costBreakdown = useMemo(() => {
@@ -1066,20 +996,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                 </nav>
 
                 <div className="drawer-footer">
-<<<<<<< HEAD
-                    {onLogout ? (
-                        <button className="drawer-logout-btn" onClick={onLogout} title="Logout">
-                            <span className="drawer-nav-icon">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                                    <polyline points="16 17 21 12 16 7" />
-                                    <line x1="21" y1="12" x2="9" y2="12" />
-                                </svg>
-                            </span>
-                            <span className="drawer-nav-label">Logout</span>
-                        </button>
-                    ) : null}
-=======
                     <button className="drawer-logout-btn" onClick={onLogout} title="Logout">
                         <span className="drawer-nav-icon">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
@@ -1090,7 +1006,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                         </span>
                         <span className="drawer-nav-label">Logout</span>
                     </button>
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                     <div className="drawer-footer-badge">
                         <span className="drawer-footer-dot"></span>
                         <span className="drawer-footer-text">Version v{APP_VERSION}</span>
@@ -1610,30 +1525,18 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                                     costLegend.forEach(m => {
                                                                         rows.push({
                                                                             _key: m.model_name,
-<<<<<<< HEAD
-                                                                            model: m.model_name,
-=======
                                                                             apiKey: m.model_name,
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                                             requests: m.request_count,
                                                                             tokens: m.total_tokens,
                                                                             cost: m.estimated_cost_usd,
                                                                         })
                                                                     })
                                                                     setDrilldownData({
-<<<<<<< HEAD
-                                                                        label: 'All AI Models',
-                                                                        chartType: 'cost',
-                                                                        title: 'Cost Breakdown — All AI Models',
-                                                                        columns: [
-                                                                            { key: 'model', label: 'Model' },
-=======
                                                                         label: 'All API Keys',
                                                                         chartType: 'cost',
                                                                         title: 'Cost Breakdown — All API Keys',
                                                                         columns: [
                                                                             { key: 'apiKey', label: 'API Key' },
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                                             { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
                                                                             { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
                                                                             { key: 'cost', label: 'Cost', render: v => formatCost(v) },
@@ -1683,19 +1586,11 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                             justifyContent: 'space-between',
                                                             paddingRight: '8px'
                                                         }}>
-<<<<<<< HEAD
-                                                            <span>Top 10 AI Models</span>
-                                                            <span>Cost / %</span>
-                                                        </div>
-                                                        {costLegend.map((model, index) => (
-                                                            <div key={index} onClick={() => openModelDrilldown(model.model_name)} style={{
-=======
                                                             <span>Top 10 API Keys</span>
                                                             <span>Cost / %</span>
                                                         </div>
                                                         {costLegend.map((model, index) => (
                                                             <div key={index} onClick={() => openApiKeyDrilldown(model.model_name)} style={{
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                                 display: 'flex',
                                                                 alignItems: 'center',
                                                                 gap: '10px',
@@ -1771,11 +1666,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                 <thead>
                                                     <tr>
                                                         <th onClick={() => handleSort('model_name')} className="sortable">
-<<<<<<< HEAD
-                                                            Model <SortIcon column="model_name" />
-=======
                                                             API Key <SortIcon column="model_name" />
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                         </th>
                                                         <th onClick={() => handleSort('request_count')} className="sortable">
                                                             Requests <SortIcon column="request_count" />
@@ -1799,11 +1690,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                 </thead>
                                                 <tbody>
                                                     {costBreakdown.length > 0 ? costBreakdown.map((m, i) => (
-<<<<<<< HEAD
-                                                        <tr key={i} className="clickable-row" onClick={() => openModelDrilldown(m.model_name)}>
-=======
                                                         <tr key={i} className="clickable-row" onClick={() => openApiKeyDrilldown(m.model_name)}>
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                             <td><span className="color-dot" style={{ background: m.color }}></span>{m.model_name}</td>
                                                             <td>{formatNumber(m.request_count)}</td>
                                                             <td>{formatNumber(m.input_tokens)}</td>
@@ -1824,11 +1711,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                             <td><strong>{formatNumber((costBreakdownAllBase || []).reduce((s, m) => s + (m.input_tokens || 0), 0))}</strong></td>
                                                             <td><strong>{formatNumber((costBreakdownAllBase || []).reduce((s, m) => s + (m.output_tokens || 0), 0))}</strong></td>
                                                             <td><strong>{formatNumber((costBreakdownAllBase || []).reduce((s, m) => s + (m.total_tokens || 0), 0))}</strong></td>
-<<<<<<< HEAD
-                                                            <td className="cost"><strong>{formatCost((costBreakdownAllBase || []).reduce((s, m) => s + (m.estimated_cost_usd || 0), 0))}</strong></td>
-=======
                                                             <td className="cost"><strong>{formatCost(apiKeyTotalCost || totalCost)}</strong></td>
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                             <td><strong>100%</strong></td>
                                                         </tr>
                                                     </tfoot>

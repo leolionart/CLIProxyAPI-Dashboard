@@ -214,13 +214,20 @@ const getDateBoundaries = (rangeId, customRange) => {
 }
 
 function App() {
+<<<<<<< HEAD
     const [authState, setAuthState] = useState({ loading: true, authenticated: false, authRequired: false, expiresAt: null, rememberMe: false })
+=======
+    const [authState, setAuthState] = useState({ loading: true, authenticated: false, expiresAt: null, rememberMe: false })
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
     const [loginForm, setLoginForm] = useState({ password: '', rememberMe: true })
     const [loginError, setLoginError] = useState('')
     const [loginSubmitting, setLoginSubmitting] = useState(false)
     const unauthorizedHandledRef = useRef(false)
+<<<<<<< HEAD
     const credentialStatsInFlightRef = useRef(false)
     const dashboardDataInFlightRef = useRef(false)
+=======
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
 
     const resetDashboardState = useCallback(() => {
         setStats(null)
@@ -245,6 +252,7 @@ function App() {
         if (unauthorizedHandledRef.current) return
         unauthorizedHandledRef.current = true
         resetDashboardState()
+<<<<<<< HEAD
         setAuthState(prev => ({
             loading: false,
             authenticated: !prev.authRequired,
@@ -252,6 +260,9 @@ function App() {
             expiresAt: null,
             rememberMe: false,
         }))
+=======
+        setAuthState({ loading: false, authenticated: false, expiresAt: null, rememberMe: false })
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
         setLoginForm(prev => ({ ...prev, password: '' }))
         setLoginError('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
     }, [resetDashboardState])
@@ -323,18 +334,27 @@ function App() {
     const fetchSession = useCallback(async () => {
         if (DEV_BYPASS_AUTH) {
             unauthorizedHandledRef.current = false
+<<<<<<< HEAD
             setAuthState({ loading: false, authenticated: true, authRequired: false, expiresAt: null, rememberMe: true })
+=======
+            setAuthState({ loading: false, authenticated: true, expiresAt: null, rememberMe: true })
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
             return true
         }
 
         try {
             const response = await authFetch(`${COLLECTOR_BASE}/auth/session`, { method: 'GET', skipUnauthorized: true })
             if (!response.ok) {
+<<<<<<< HEAD
                 setAuthState({ loading: false, authenticated: false, authRequired: true, expiresAt: null, rememberMe: false })
+=======
+                setAuthState({ loading: false, authenticated: false, expiresAt: null, rememberMe: false })
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                 return false
             }
 
             const session = await response.json()
+<<<<<<< HEAD
             const authRequired = Boolean(session.auth_required)
             const authenticated = !authRequired || Boolean(session.authenticated)
             unauthorizedHandledRef.current = false
@@ -349,6 +369,19 @@ function App() {
         } catch (error) {
             console.error('Error fetching session:', error)
             setAuthState({ loading: false, authenticated: false, authRequired: true, expiresAt: null, rememberMe: false })
+=======
+            unauthorizedHandledRef.current = false
+            setAuthState({
+                loading: false,
+                authenticated: Boolean(session.authenticated),
+                expiresAt: session.expires_at || null,
+                rememberMe: Boolean(session.remember_me),
+            })
+            return Boolean(session.authenticated)
+        } catch (error) {
+            console.error('Error fetching session:', error)
+            setAuthState({ loading: false, authenticated: false, expiresAt: null, rememberMe: false })
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
             return false
         }
     }, [authFetch])
@@ -358,10 +391,13 @@ function App() {
             setCredentialLoading(false)
             return
         }
+<<<<<<< HEAD
         if (credentialStatsInFlightRef.current) {
             return
         }
         credentialStatsInFlightRef.current = true
+=======
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
 
         try {
             setCredentialLoading(true)
@@ -525,6 +561,7 @@ function App() {
                 .sort((a, b) => (a.stat_date || '').localeCompare(b.stat_date || ''))
 
             const { startTime, endTime } = getDateBoundaries(rangeId, customRange)
+<<<<<<< HEAD
             let apiKeyHourlySeries = []
             let hasHourlyAggregates = false
             try {
@@ -562,11 +599,213 @@ function App() {
                 console.debug('credential_hourly_stats not available:', hourlyErr.message)
             }
 
+=======
+            let snapshotsRawQuery = supabase
+                .from('usage_snapshots')
+                .select('id, collected_at, raw_data, model_usage(api_endpoint, estimated_cost_usd)')
+                .order('collected_at', { ascending: true })
+
+            if (startTime) snapshotsRawQuery = snapshotsRawQuery.gte('collected_at', startTime)
+            if (endTime) snapshotsRawQuery = snapshotsRawQuery.lt('collected_at', endTime)
+
+            const { data: snapshotsRawRows, error: snapshotsRawError } = await snapshotsRawQuery
+
+            let baselineRaw = null
+            if (startTime) {
+                const { data: baselineRawRows } = await supabase
+                    .from('usage_snapshots')
+                    .select('id, collected_at, raw_data, model_usage(api_endpoint, estimated_cost_usd)')
+                    .lt('collected_at', startTime)
+                    .order('collected_at', { ascending: false })
+                    .limit(1)
+                baselineRaw = baselineRawRows?.[0] || null
+            }
+
+            const readCumulativeApis = (snap) => {
+                const apis = snap?.raw_data?.usage?.apis || {}
+                const out = {}
+                for (const apiData of Object.values(apis)) {
+                    const models = apiData?.models || {}
+                    for (const modelData of Object.values(models)) {
+                        for (const detail of (modelData?.details || [])) {
+                            const apiKeyName = detail?.api_key_name || detail?.api_key_hash || 'unknown'
+                            const tokens = detail?.tokens || {}
+                            if (!out[apiKeyName]) {
+                                out[apiKeyName] = {
+                                    total_requests: 0,
+                                    success_count: 0,
+                                    failure_count: 0,
+                                    input_tokens: 0,
+                                    output_tokens: 0,
+                                    reasoning_tokens: 0,
+                                    cached_tokens: 0,
+                                    total_tokens: 0,
+                                }
+                            }
+                            out[apiKeyName].total_requests += 1
+                            out[apiKeyName].success_count += detail?.failed ? 0 : 1
+                            out[apiKeyName].failure_count += detail?.failed ? 1 : 0
+                            out[apiKeyName].input_tokens += tokens.input_tokens || 0
+                            out[apiKeyName].output_tokens += tokens.output_tokens || 0
+                            out[apiKeyName].reasoning_tokens += tokens.reasoning_tokens || 0
+                            out[apiKeyName].cached_tokens += tokens.cached_tokens || tokens.cache_tokens || 0
+                            out[apiKeyName].total_tokens += tokens.total_tokens || 0
+                        }
+                    }
+                }
+                return out
+            }
+
+            const readCumulativeCostByApi = (snap) => {
+                // Snapshot model_usage is keyed by HTTP endpoint/model, not inbound
+                // API key. Daily SQLite-derived breakdown supplies API-key cost.
+                return {}
+            }
+
+            const mergeHourEntry = (hourMap, hourKey, apiKeyName, delta) => {
+                if (!hourMap[hourKey]) {
+                    hourMap[hourKey] = { total_requests: 0, total_tokens: 0, total_cost: 0, keys: {} }
+                }
+                const hour = hourMap[hourKey]
+                if (!hour.keys[apiKeyName]) {
+                    hour.keys[apiKeyName] = {
+                        api_key_name: apiKeyName,
+                        total_requests: 0,
+                        total_tokens: 0,
+                        success_count: 0,
+                        failure_count: 0,
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        reasoning_tokens: 0,
+                        cached_tokens: 0,
+                        estimated_cost_usd: 0,
+                    }
+                }
+                const keyRow = hour.keys[apiKeyName]
+                keyRow.total_requests += delta.total_requests
+                keyRow.total_tokens += delta.total_tokens
+                keyRow.success_count += delta.success_count
+                keyRow.failure_count += delta.failure_count
+                keyRow.input_tokens += delta.input_tokens
+                keyRow.output_tokens += delta.output_tokens
+                keyRow.reasoning_tokens += delta.reasoning_tokens || 0
+                keyRow.cached_tokens += delta.cached_tokens || 0
+                keyRow.estimated_cost_usd += delta.estimated_cost_usd
+                hour.total_requests += delta.total_requests
+                hour.total_tokens += delta.total_tokens
+                hour.total_cost += delta.estimated_cost_usd
+            }
+
+            const hourMap = {}
+            let prevRaw = baselineRaw
+            if (snapshotsRawRows && snapshotsRawRows.length > 0) {
+                for (const snap of snapshotsRawRows) {
+                    const curr = readCumulativeApis(snap)
+                    const currCost = readCumulativeCostByApi(snap)
+                    if (prevRaw) {
+                        const prev = readCumulativeApis(prevRaw)
+                        const prevCost = readCumulativeCostByApi(prevRaw)
+                        const allKeys = new Set([...Object.keys(prev), ...Object.keys(curr), ...Object.keys(prevCost), ...Object.keys(currCost)])
+                        const dt = new Date(snap.collected_at)
+                        const hourBucket = `${dt.toLocaleDateString('en-CA')} ${dt.getHours().toString().padStart(2, '0')}:00`
+
+                        for (const apiKeyName of allKeys) {
+                            const p = prev[apiKeyName] || {
+                                total_requests: 0,
+                                total_tokens: 0,
+                                success_count: 0,
+                                failure_count: 0,
+                                input_tokens: 0,
+                                output_tokens: 0,
+                                reasoning_tokens: 0,
+                                cached_tokens: 0,
+                            }
+                            const c = curr[apiKeyName] || {
+                                total_requests: 0,
+                                total_tokens: 0,
+                                success_count: 0,
+                                failure_count: 0,
+                                input_tokens: 0,
+                                output_tokens: 0,
+                                reasoning_tokens: 0,
+                                cached_tokens: 0,
+                            }
+
+                            let delta = {
+                                total_requests: c.total_requests - p.total_requests,
+                                total_tokens: c.total_tokens - p.total_tokens,
+                                success_count: c.success_count - p.success_count,
+                                failure_count: c.failure_count - p.failure_count,
+                                input_tokens: c.input_tokens - p.input_tokens,
+                                output_tokens: c.output_tokens - p.output_tokens,
+                                reasoning_tokens: c.reasoning_tokens - p.reasoning_tokens,
+                                cached_tokens: c.cached_tokens - p.cached_tokens,
+                                estimated_cost_usd: (currCost[apiKeyName] || 0) - (prevCost[apiKeyName] || 0),
+                            }
+
+                            if (delta.total_requests < 0 || delta.total_tokens < 0 || delta.success_count < 0 || delta.failure_count < 0 || delta.estimated_cost_usd < 0) {
+                                delta = {
+                                    total_requests: c.total_requests,
+                                    total_tokens: c.total_tokens,
+                                    success_count: c.success_count,
+                                    failure_count: c.failure_count,
+                                    input_tokens: c.input_tokens,
+                                    output_tokens: c.output_tokens,
+                                    reasoning_tokens: c.reasoning_tokens,
+                                    cached_tokens: c.cached_tokens,
+                                    estimated_cost_usd: currCost[apiKeyName] || 0,
+                                }
+                            }
+
+                            delta.total_requests = Math.max(0, delta.total_requests)
+                            delta.total_tokens = Math.max(0, delta.total_tokens)
+                            delta.success_count = Math.max(0, delta.success_count)
+                            delta.failure_count = Math.max(0, delta.failure_count)
+                            delta.input_tokens = Math.max(0, delta.input_tokens)
+                            delta.output_tokens = Math.max(0, delta.output_tokens)
+                            delta.reasoning_tokens = Math.max(0, delta.reasoning_tokens || 0)
+                            delta.cached_tokens = Math.max(0, delta.cached_tokens || 0)
+                            delta.estimated_cost_usd = Math.max(0, delta.estimated_cost_usd)
+
+                            if (delta.total_requests > 0 || delta.total_tokens > 0 || delta.estimated_cost_usd > 0) {
+                                mergeHourEntry(hourMap, hourBucket, apiKeyName, delta)
+                            }
+                        }
+                    }
+                    prevRaw = snap
+                }
+            }
+
+            const apiKeyHourlySeries = Object.entries(hourMap)
+                .map(([hour, data]) => {
+                    const keys = Object.values(data.keys)
+                        .map((k) => ({
+                            ...k,
+                            success_rate: k.total_requests > 0
+                                ? Math.round((k.success_count / k.total_requests) * 1000) / 10
+                                : 0,
+                        }))
+                        .sort((a, b) => b.total_requests - a.total_requests)
+                    return {
+                        hour,
+                        total_requests: data.total_requests,
+                        total_tokens: data.total_tokens,
+                        total_cost: data.total_cost || 0,
+                        keys,
+                    }
+                })
+                .sort((a, b) => a.hour.localeCompare(b.hour))
+
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
             setCredentialTimeSeries({
                 byDay: apiKeyDailySeries,
                 byHour: apiKeyHourlySeries,
                 meta: {
+<<<<<<< HEAD
                     hasRawSnapshots: hasHourlyAggregates,
+=======
+                    hasRawSnapshots: !snapshotsRawError,
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                     hasHourlyData: apiKeyHourlySeries.length > 0,
                     rangeId,
                 },
@@ -603,10 +842,13 @@ function App() {
         if (!authState.authenticated) {
             return
         }
+<<<<<<< HEAD
         if (dashboardDataInFlightRef.current) {
             return
         }
         dashboardDataInFlightRef.current = true
+=======
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
 
         const shouldShowInitialLoading = isInitial && !hasInitialDataLoaded
 
@@ -618,10 +860,13 @@ function App() {
             }
 
             const { startTime, endTime, startDate, endDate } = getDateBoundaries(rangeId, customRange)
+<<<<<<< HEAD
             const isCustomSingleDay = rangeId === 'custom'
                 && customRange?.startDate
                 && customRange.startDate === customRange.endDate
             const shouldFetchSnapshotSeries = rangeId === 'today' || rangeId === 'yesterday' || isCustomSingleDay
+=======
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
 
             const { data: latestSnapshots } = await supabase
                 .from('usage_snapshots')
@@ -634,12 +879,19 @@ function App() {
                 setLastUpdated(new Date(latestSnapshots[0].collected_at))
             }
 
+<<<<<<< HEAD
             let snapshotsData = []
             if (shouldFetchSnapshotSeries) {
                 let snapshotsQuery = supabase
                     .from('usage_snapshots')
                     .select('id, collected_at, total_requests, success_count, failure_count, total_tokens, model_usage(model_name, request_count, total_tokens, estimated_cost_usd, input_tokens, output_tokens, reasoning_tokens, cached_tokens)')
                     .order('collected_at', { ascending: true })
+=======
+            let snapshotsQuery = supabase
+                .from('usage_snapshots')
+                .select('id, collected_at, total_requests, success_count, failure_count, total_tokens, raw_data, model_usage(model_name, request_count, total_tokens, estimated_cost_usd, input_tokens, output_tokens, reasoning_tokens, cached_tokens)')
+                .order('collected_at', { ascending: true })
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
 
                 if (startTime) {
                     snapshotsQuery = snapshotsQuery.gte('collected_at', startTime)
@@ -652,6 +904,11 @@ function App() {
                 snapshotsData = data || []
             }
 
+<<<<<<< HEAD
+=======
+            const { data: snapshotsData } = await snapshotsQuery
+
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
             let baselineSnapshot = null
             if (shouldFetchSnapshotSeries && startTime && snapshotsData.length > 0) {
                 const { data: baselineData } = await supabase
@@ -1259,7 +1516,11 @@ function App() {
 
         if (DEV_BYPASS_AUTH) {
             unauthorizedHandledRef.current = false
+<<<<<<< HEAD
             setAuthState({ loading: false, authenticated: true, authRequired: false, expiresAt: null, rememberMe: true })
+=======
+            setAuthState({ loading: false, authenticated: true, expiresAt: null, rememberMe: true })
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
             setLoginError('')
             return
         }
@@ -1281,6 +1542,7 @@ function App() {
             }
 
             const session = await response.json()
+<<<<<<< HEAD
             const authRequired = Boolean(session.auth_required)
             const authenticated = !authRequired || Boolean(session.authenticated)
             unauthorizedHandledRef.current = false
@@ -1288,6 +1550,12 @@ function App() {
                 loading: false,
                 authenticated,
                 authRequired,
+=======
+            unauthorizedHandledRef.current = false
+            setAuthState({
+                loading: false,
+                authenticated: Boolean(session.authenticated),
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                 expiresAt: session.expires_at || null,
                 rememberMe: Boolean(session.remember_me),
             })
@@ -1309,6 +1577,7 @@ function App() {
         } finally {
             unauthorizedHandledRef.current = false
             resetDashboardState()
+<<<<<<< HEAD
             setAuthState(prev => ({
                 loading: false,
                 authenticated: !prev.authRequired,
@@ -1316,6 +1585,9 @@ function App() {
                 expiresAt: null,
                 rememberMe: false,
             }))
+=======
+            setAuthState({ loading: false, authenticated: false, expiresAt: null, rememberMe: false })
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
             setLoginForm(prev => ({ ...prev, password: '' }))
             setLoginError('')
         }
@@ -1335,7 +1607,11 @@ function App() {
         )
     }
 
+<<<<<<< HEAD
     if (authState.authRequired && !authState.authenticated) {
+=======
+    if (!authState.authenticated) {
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
         return (
             <div className="dashboard auth-screen">
                 <div className="auth-shell">
@@ -1410,7 +1686,11 @@ function App() {
                 skillDailyStats={mockSkillData.skillDailyStats}
                 appLogs={appLogs}
                 onClearAllLogs={clearAllAppLogs}
+<<<<<<< HEAD
                 onLogout={authState.authRequired ? handleLogout : undefined}
+=======
+                onLogout={handleLogout}
+>>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
             />
         </div>
     )
