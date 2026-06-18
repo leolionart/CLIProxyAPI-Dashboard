@@ -93,6 +93,7 @@ docker-compose.override.yml
 # Backup & Temporary Files
 # ============================================
 *.bak
+*.bak-*
 *.tmp
 *.temp
 .cache/
