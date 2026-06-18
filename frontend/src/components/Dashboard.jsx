@@ -385,27 +385,25 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return '$' + Math.round(cost).toLocaleString('en-US')
     }
 
-    // API key usage. When CPA_USAGE_DB_PATH is mounted, collector resolves
-    // CPA usage_events.api_key_hash back to configured inbound API-key names.
+    // API key usage must come from credential stats. Endpoint usage has names
+    // like "responses" or "completions" and should not be shown as API keys.
     const endpointUsage = useMemo(() => {
-        const sourceRows = (rawEndpointUsage || []).length > 0
-            ? rawEndpointUsage
-            : (credentialData?.api_keys || []).map((key) => ({
-                api_endpoint: key.api_key_name || 'unknown',
-                request_count: key.total_requests || 0,
-                total_tokens: key.total_tokens || 0,
-                input_tokens: key.input_tokens || 0,
-                output_tokens: key.output_tokens || 0,
-                reasoning_tokens: key.reasoning_tokens || 0,
-                cached_tokens: key.cached_tokens || 0,
-                estimated_cost_usd: key.estimated_cost_usd || 0,
-                success_count: key.success_count || 0,
-                failure_count: key.failure_count || 0,
-                models: key.models || {},
-                endpoints: key.endpoints || [],
-                credentials_used: key.credentials_used || [],
-                isApiKeyUsage: true,
-            }))
+        const sourceRows = (credentialData?.api_keys || []).map((key) => ({
+            api_endpoint: key.api_key_name || 'unknown',
+            request_count: key.total_requests || 0,
+            total_tokens: key.total_tokens || 0,
+            input_tokens: key.input_tokens || 0,
+            output_tokens: key.output_tokens || 0,
+            reasoning_tokens: key.reasoning_tokens || 0,
+            cached_tokens: key.cached_tokens || 0,
+            estimated_cost_usd: key.estimated_cost_usd || 0,
+            success_count: key.success_count || 0,
+            failure_count: key.failure_count || 0,
+            models: key.models || {},
+            endpoints: key.endpoints || [],
+            credentials_used: key.credentials_used || [],
+            isApiKeyUsage: true,
+        }))
 
         const normalized = sourceRows
             .map(m => {
@@ -437,13 +435,8 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             return normalized.sort((a, b) => (b.tokens || 0) - (a.tokens || 0))
         }
         return normalized.sort((a, b) => (b.requests || 0) - (a.requests || 0))
-    }, [credentialData, rawEndpointUsage, endpointSort])
+    }, [credentialData, endpointSort])
 
-<<<<<<< HEAD
-=======
-    const apiKeyTotalCost = endpointUsage.reduce((sum, key) => sum + (key.cost || key.estimated_cost_usd || 0), 0)
-
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
     const formatDateLabel = (value) => value ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''
     const formatISODate = (dateObj) => {
         if (!dateObj) return null
@@ -695,7 +688,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
     const sparklineData = hourlyChartData.slice(-12)
     const costSparkline = dailyChartData.length >= 2 ? dailyChartData : [...Array(7)].map((_, i) => ({ cost: i === 6 ? totalCost : totalCost * (i * 0.1) }))
 
-<<<<<<< HEAD
     // Cost breakdown datasets: Cost Analysis is intentionally grouped by AI model.
     const costBreakdownAllBase = useMemo(() => {
         const modelRows = filteredModelUsage.length > 0
@@ -751,31 +743,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             .sort((a, b) => (b.estimated_cost_usd || 0) - (a.estimated_cost_usd || 0))
             .slice(0, 10)
     }, [costBreakdownAllBase])
-=======
-    // Cost breakdown datasets
-    const topModelSet = useMemo(() => new Set(activeTopModels), [activeTopModels])
-
-    // Full dataset for Details tab (unlimited)
-    const costBreakdownAllBase = useMemo(() => {
-        const denominator = apiKeyTotalCost || totalCost
-        return (endpointUsage || []).map((m) => ({
-            ...m,
-            model_name: m.endpoint_full || m.endpoint || m.api_endpoint,
-            request_count: m.requests || m.request_count || 0,
-            total_tokens: m.tokens || m.total_tokens || 0,
-            estimated_cost_usd: m.cost || m.estimated_cost_usd || 0,
-            percentage: denominator > 0 ? (((m.cost || m.estimated_cost_usd || 0) / denominator) * 100).toFixed(0) : '0',
-            color: getModelColor(m.endpoint_full || m.endpoint || m.api_endpoint)
-        }))
-    }, [endpointUsage, apiKeyTotalCost, totalCost])
-
-    // Chart/legend dataset follows same top model scope as Usage Trends
-    const costLegend = useMemo(() => {
-        return costBreakdownAllBase
-            .filter(m => topModelSet.has(m.model_name))
-            .sort((a, b) => (b.estimated_cost_usd || 0) - (a.estimated_cost_usd || 0))
-    }, [costBreakdownAllBase, topModelSet])
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
 
     // Table sorting honors user-selected column/direction
     const costBreakdown = useMemo(() => {
@@ -1066,7 +1033,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                 </nav>
 
                 <div className="drawer-footer">
-<<<<<<< HEAD
                     {onLogout ? (
                         <button className="drawer-logout-btn" onClick={onLogout} title="Logout">
                             <span className="drawer-nav-icon">
@@ -1079,18 +1045,6 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                             <span className="drawer-nav-label">Logout</span>
                         </button>
                     ) : null}
-=======
-                    <button className="drawer-logout-btn" onClick={onLogout} title="Logout">
-                        <span className="drawer-nav-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                                <polyline points="16 17 21 12 16 7" />
-                                <line x1="21" y1="12" x2="9" y2="12" />
-                            </svg>
-                        </span>
-                        <span className="drawer-nav-label">Logout</span>
-                    </button>
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                     <div className="drawer-footer-badge">
                         <span className="drawer-footer-dot"></span>
                         <span className="drawer-footer-text">Version v{APP_VERSION}</span>
@@ -1610,30 +1564,18 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                                     costLegend.forEach(m => {
                                                                         rows.push({
                                                                             _key: m.model_name,
-<<<<<<< HEAD
                                                                             model: m.model_name,
-=======
-                                                                            apiKey: m.model_name,
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                                             requests: m.request_count,
                                                                             tokens: m.total_tokens,
                                                                             cost: m.estimated_cost_usd,
                                                                         })
                                                                     })
                                                                     setDrilldownData({
-<<<<<<< HEAD
                                                                         label: 'All AI Models',
                                                                         chartType: 'cost',
                                                                         title: 'Cost Breakdown — All AI Models',
                                                                         columns: [
                                                                             { key: 'model', label: 'Model' },
-=======
-                                                                        label: 'All API Keys',
-                                                                        chartType: 'cost',
-                                                                        title: 'Cost Breakdown — All API Keys',
-                                                                        columns: [
-                                                                            { key: 'apiKey', label: 'API Key' },
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                                             { key: 'requests', label: 'Requests', render: v => formatNumber(v) },
                                                                             { key: 'tokens', label: 'Tokens', render: v => formatNumber(v) },
                                                                             { key: 'cost', label: 'Cost', render: v => formatCost(v) },
@@ -1683,19 +1625,11 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                             justifyContent: 'space-between',
                                                             paddingRight: '8px'
                                                         }}>
-<<<<<<< HEAD
                                                             <span>Top 10 AI Models</span>
                                                             <span>Cost / %</span>
                                                         </div>
                                                         {costLegend.map((model, index) => (
                                                             <div key={index} onClick={() => openModelDrilldown(model.model_name)} style={{
-=======
-                                                            <span>Top 10 API Keys</span>
-                                                            <span>Cost / %</span>
-                                                        </div>
-                                                        {costLegend.map((model, index) => (
-                                                            <div key={index} onClick={() => openApiKeyDrilldown(model.model_name)} style={{
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                                 display: 'flex',
                                                                 alignItems: 'center',
                                                                 gap: '10px',
@@ -1771,11 +1705,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                 <thead>
                                                     <tr>
                                                         <th onClick={() => handleSort('model_name')} className="sortable">
-<<<<<<< HEAD
                                                             Model <SortIcon column="model_name" />
-=======
-                                                            API Key <SortIcon column="model_name" />
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                         </th>
                                                         <th onClick={() => handleSort('request_count')} className="sortable">
                                                             Requests <SortIcon column="request_count" />
@@ -1799,11 +1729,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                 </thead>
                                                 <tbody>
                                                     {costBreakdown.length > 0 ? costBreakdown.map((m, i) => (
-<<<<<<< HEAD
                                                         <tr key={i} className="clickable-row" onClick={() => openModelDrilldown(m.model_name)}>
-=======
-                                                        <tr key={i} className="clickable-row" onClick={() => openApiKeyDrilldown(m.model_name)}>
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                             <td><span className="color-dot" style={{ background: m.color }}></span>{m.model_name}</td>
                                                             <td>{formatNumber(m.request_count)}</td>
                                                             <td>{formatNumber(m.input_tokens)}</td>
@@ -1824,11 +1750,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
                                                             <td><strong>{formatNumber((costBreakdownAllBase || []).reduce((s, m) => s + (m.input_tokens || 0), 0))}</strong></td>
                                                             <td><strong>{formatNumber((costBreakdownAllBase || []).reduce((s, m) => s + (m.output_tokens || 0), 0))}</strong></td>
                                                             <td><strong>{formatNumber((costBreakdownAllBase || []).reduce((s, m) => s + (m.total_tokens || 0), 0))}</strong></td>
-<<<<<<< HEAD
                                                             <td className="cost"><strong>{formatCost((costBreakdownAllBase || []).reduce((s, m) => s + (m.estimated_cost_usd || 0), 0))}</strong></td>
-=======
-                                                            <td className="cost"><strong>{formatCost(apiKeyTotalCost || totalCost)}</strong></td>
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                                                             <td><strong>100%</strong></td>
                                                         </tr>
                                                     </tfoot>

@@ -21,6 +21,7 @@ from collections import defaultdict
 import hashlib
 import json
 import os
+import re
 import sqlite3
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,79 @@ AK_NUMERIC_FIELDS = [
 
 # Numeric fields on API key model entries
 AK_MODEL_NUMERIC_FIELDS = ['requests', 'tokens', 'success', 'failure']
+
+SECRET_LIKE_PATTERNS = (
+    re.compile(r'^[0-9a-f]{32,}$', re.IGNORECASE),
+    re.compile(r'^[A-Za-z0-9_-]{48,}$'),
+    re.compile(r'^(sk|ak|pk|rk|key|token)-[A-Za-z0-9_-]{16,}$', re.IGNORECASE),
+)
+
+
+def _looks_like_secret(value: str) -> bool:
+    text = str(value or '').strip()
+    if not text:
+        return False
+    return any(pattern.match(text) for pattern in SECRET_LIKE_PATTERNS)
+
+
+def safe_api_key_display(value: Any, fallback_hash: str = '') -> str:
+    """
+    Return a UI-safe API key label. Raw keys are used only for hashing upstream;
+    dashboard JSON must not expose them.
+    """
+    text = str(value or '').strip()
+    if text and not _looks_like_secret(text):
+        return text
+
+    digest = str(fallback_hash or '').strip()
+    if not digest and text:
+        digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
+    if digest:
+        return f"sha256:{digest[:12]}"
+    return 'unknown'
+
+
+def resolve_api_key_identity(entry: Any) -> Tuple[str, str]:
+    """
+    Parse one management API-key entry into (hash, safe_label).
+
+    CPA deployments may expose configured keys either as raw strings or as
+    objects with metadata. Prefer alias/name/label for display, and never
+    return the raw key as the display value when it looks secret-like.
+    """
+    if isinstance(entry, dict):
+        raw_key = str(
+            entry.get('key') or
+            entry.get('api_key') or
+            entry.get('apiKey') or
+            entry.get('value') or
+            entry.get('token') or
+            entry.get('secret') or
+            ''
+        ).strip()
+        key_hash = str(
+            entry.get('hash') or
+            entry.get('api_key_hash') or
+            entry.get('apiKeyHash') or
+            entry.get('key_hash') or
+            entry.get('sha256') or
+            ''
+        ).strip()
+        label = str(
+            entry.get('alias') or
+            entry.get('name') or
+            entry.get('label') or
+            entry.get('display_name') or
+            entry.get('displayName') or
+            ''
+        ).strip()
+        if not key_hash and raw_key:
+            key_hash = hashlib.sha256(raw_key.encode('utf-8')).hexdigest()
+        return key_hash, safe_api_key_display(label or raw_key, key_hash)
+
+    raw = str(entry or '').strip()
+    key_hash = hashlib.sha256(raw.encode('utf-8')).hexdigest() if raw else ''
+    return key_hash, safe_api_key_display(raw, key_hash)
 
 
 def _sum_model_details(model_data: Dict) -> None:
@@ -150,13 +224,17 @@ def _detail_api_key_name(detail: Dict, cred_info: Dict) -> str:
     explicit API-key fields if future payloads include them; otherwise use the
     auth snapshot/credential identity that actually handled the request.
     """
+    key_hash = str(detail.get('api_key_hash') or '').strip()
     for field in (
-        'api_key_name', 'api_key_label', 'api_key_id', 'api_key_hash',
-        'key_name', 'consumer', 'client_id',
+        'api_key_alias', 'api_key_name', 'api_key_label',
+        'key_alias', 'key_name', 'consumer', 'client_id',
     ):
         value = str(detail.get(field) or '').strip()
         if value:
-            return value
+            return safe_api_key_display(value, key_hash)
+
+    if key_hash:
+        return safe_api_key_display('', key_hash)
 
     auth_index = str(detail.get('auth_index') or cred_info.get('auth_index') or '').strip()
     label = str(
@@ -461,7 +539,7 @@ class CredentialStatsSync:
             logger.error(f"Failed to fetch usage: {e}")
             return None
 
-    def fetch_api_keys(self) -> List[str]:
+    def fetch_api_keys(self) -> List[Any]:
         """Fetch configured inbound API keys so CPA api_key_hash can be labeled."""
         try:
             headers = {
@@ -477,15 +555,17 @@ class CredentialStatsSync:
                 return []
             payload = resp.json()
             values = payload.get('api-keys') or payload.get('api_keys') or []
-            return [str(v) for v in values if str(v or '').strip()]
+            return [v for v in values if v]
         except Exception as e:
             logger.warning(f"Failed to fetch API keys: {e}")
             return []
 
     def _api_key_hash_map(self) -> Dict[str, str]:
         mapping: Dict[str, str] = {}
-        for key in self.fetch_api_keys():
-            mapping[hashlib.sha256(key.encode('utf-8')).hexdigest()] = key
+        for key_entry in self.fetch_api_keys():
+            key_hash, label = resolve_api_key_identity(key_entry)
+            if key_hash:
+                mapping[key_hash] = label
         return mapping
 
     def fetch_usage_from_sqlite(self) -> Optional[Dict]:
@@ -558,7 +638,7 @@ class CredentialStatsSync:
                 'total_tokens': int(row['total_tokens'] or 0),
             }
             api_key_hash = str(row['api_key_hash'] or '').strip()
-            api_key_name = key_by_hash.get(api_key_hash) or (f"sha256:{api_key_hash[:12]}" if api_key_hash else '')
+            api_key_name = key_by_hash.get(api_key_hash) or (safe_api_key_display('', api_key_hash) if api_key_hash else '')
 
             api_data = usage['apis'].setdefault(endpoint, {'models': {}})
             model_data = api_data['models'].setdefault(model, {'details': []})

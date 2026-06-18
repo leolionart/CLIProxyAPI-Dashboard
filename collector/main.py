@@ -22,7 +22,12 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, Blueprint, request, make_response, Response, g
 from flask_cors import CORS
 from db import PostgreSQLClient
-from credential_stats_sync import CredentialStatsSync, sync_credential_stats, normalize_usage_payload
+from credential_stats_sync import (
+    CredentialStatsSync,
+    normalize_usage_payload,
+    safe_api_key_display,
+    sync_credential_stats,
+)
 from waitress import serve
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -65,10 +70,7 @@ CREDENTIAL_SYNC_INTERVAL = _env_int('CREDENTIAL_SYNC_INTERVAL_SECONDS', COLLECTO
 APP_LOG_CLEANUP_INTERVAL_MINUTES = _env_int('APP_LOG_CLEANUP_INTERVAL_MINUTES', 30)
 TRIGGER_PORT = _env_int('COLLECTOR_TRIGGER_PORT', 5001)
 
-<<<<<<< HEAD
 ADMIN_AUTH_REQUIRED = str(os.getenv('ADMIN_AUTH_REQUIRED', 'false')).strip().lower() in {'1', 'true', 'yes', 'on'}
-=======
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
 ADMIN_PASSWORD = str(os.getenv('ADMIN_PASSWORD', '')).strip()
 ADMIN_SESSION_COOKIE_NAME = str(os.getenv('ADMIN_SESSION_COOKIE_NAME', 'cliproxy_admin_session')).strip() or 'cliproxy_admin_session'
 ADMIN_SESSION_TTL_DAYS = _env_int('ADMIN_SESSION_TTL_DAYS', 30)
@@ -310,18 +312,12 @@ def _revoke_session(session_row: Optional[Dict[str, Any]]) -> None:
 
 
 def _session_payload(session_row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-<<<<<<< HEAD
     if not ADMIN_AUTH_REQUIRED:
         return {'auth_required': False, 'authenticated': True}
     if not session_row:
         return {'auth_required': True, 'authenticated': False}
     return {
         'auth_required': True,
-=======
-    if not session_row:
-        return {'authenticated': False}
-    return {
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
         'authenticated': True,
         'remember_me': bool(session_row.get('remember_me')),
         'expires_at': session_row.get('expires_at'),
@@ -330,11 +326,8 @@ def _session_payload(session_row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _require_admin_session() -> Optional[Response]:
-<<<<<<< HEAD
     if not ADMIN_AUTH_REQUIRED:
         return None
-=======
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
     session_row = _get_authenticated_session()
     if not session_row:
         return jsonify({'error': 'authentication required'}), 401
@@ -526,12 +519,9 @@ def health_check():
 
 @api_bp.route('/auth/login', methods=['POST'])
 def auth_login():
-<<<<<<< HEAD
     if not ADMIN_AUTH_REQUIRED:
         return jsonify(_session_payload(None))
 
-=======
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
     if not db_client:
         return jsonify({'error': 'database not initialized'}), 500
 
@@ -593,12 +583,9 @@ def auth_logout():
 
 @api_bp.route('/auth/verify', methods=['GET'])
 def auth_verify():
-<<<<<<< HEAD
     if not ADMIN_AUTH_REQUIRED:
         return make_response('', 204)
 
-=======
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
     session_row = _get_authenticated_session()
     if not session_row:
         response = make_response('', 401)
@@ -1164,7 +1151,8 @@ def _build_daily_stats_from_usage_events(usage: Dict[str, Any], pricing: Dict[st
         stat_date = _parse_usage_event_datetime(detail.get('timestamp')).date().isoformat()
         model_name = event['model_name']
         endpoint = event['api_endpoint']
-        api_key_name = str(detail.get('api_key_name') or detail.get('api_key_hash') or 'unknown').strip() or 'unknown'
+        api_key_hash = str(detail.get('api_key_hash') or '').strip()
+        api_key_name = safe_api_key_display(detail.get('api_key_name'), api_key_hash)
         failed = bool(detail.get('failed'))
 
         input_tok = int(tokens.get('input_tokens') or 0)
@@ -1263,7 +1251,6 @@ def _upsert_sqlite_event_daily_stats(usage: Dict[str, Any], pricing: Dict[str, D
     }
 
 
-<<<<<<< HEAD
 def _build_credential_hourly_stats_from_usage_events(usage: Dict[str, Any], pricing: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, Any]]:
     hourly: Dict[str, Dict[str, Any]] = {}
 
@@ -1274,7 +1261,8 @@ def _build_credential_hourly_stats_from_usage_events(usage: Dict[str, Any], pric
         bucket_local = event_dt.replace(minute=0, second=0, microsecond=0)
         bucket_utc = bucket_local.astimezone(timezone.utc).isoformat()
         model_name = event['model_name']
-        api_key_name = str(detail.get('api_key_name') or detail.get('api_key_hash') or 'unknown').strip() or 'unknown'
+        api_key_hash = str(detail.get('api_key_hash') or '').strip()
+        api_key_name = safe_api_key_display(detail.get('api_key_name'), api_key_hash)
         failed = bool(detail.get('failed'))
 
         input_tok = int(tokens.get('input_tokens') or 0)
@@ -1362,8 +1350,6 @@ def _upsert_credential_hourly_stats(usage: Dict[str, Any], pricing: Dict[str, Di
     }
 
 
-=======
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
 def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tuple[bool, Dict[str, Any]]:
     """Store usage data in PostgreSQL database with proper daily delta calculation."""
     if not db_client or not data or 'usage' not in data:
@@ -1383,10 +1369,7 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
             'model_usage_insert': 0,
             'snapshot_cost_update': 0,
             'daily_stats_upsert': 0,
-<<<<<<< HEAD
             'credential_hourly_stats_upsert': 0,
-=======
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
         }
 
         # Current cumulative values from CLIProxy
@@ -1458,12 +1441,9 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
             t0 = time.time()
             rebuild_summary = _upsert_sqlite_event_daily_stats(usage, pricing)
             db_timings_ms['daily_stats_upsert'] = int((time.time() - t0) * 1000)
-<<<<<<< HEAD
             t0 = time.time()
             hourly_summary = _upsert_credential_hourly_stats(usage, pricing)
             db_timings_ms['credential_hourly_stats_upsert'] = int((time.time() - t0) * 1000)
-=======
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
             if run_id:
                 _log_sync_event(
                     run_id=run_id,
@@ -1478,7 +1458,6 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
                         'model_rows_inserted': len(model_records),
                         'db_timings_ms': db_timings_ms,
                         **rebuild_summary,
-<<<<<<< HEAD
                         **hourly_summary,
                     },
                 )
@@ -1488,13 +1467,6 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
                 rebuild_summary['days_rebuilt'],
                 hourly_summary['hours_rebuilt'],
                 rebuild_summary['total_events'],
-=======
-                    },
-                )
-            logger.info(
-                "Stored SQLite snapshot %s and rebuilt %s daily_stats day(s) from %s events",
-                snapshot_id, rebuild_summary['days_rebuilt'], rebuild_summary['total_events']
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
             )
             return True, {
                 'run_id': run_id,
@@ -1502,10 +1474,7 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
                 'snapshot_id': snapshot_id,
                 'model_rows_inserted': len(model_records),
                 'daily_rebuild': rebuild_summary,
-<<<<<<< HEAD
                 'credential_hourly_rebuild': hourly_summary,
-=======
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
                 'db_timings_ms': db_timings_ms,
                 'duration_ms': int((time.time() - started_at) * 1000),
             }

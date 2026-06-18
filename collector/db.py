@@ -23,10 +23,7 @@ JSONB_COLUMNS: Dict[str, set] = {
     'daily_stats': {'breakdown'},
     'credential_usage_summary': {'credentials', 'api_keys'},
     'credential_daily_stats': {'credentials', 'api_keys'},
-<<<<<<< HEAD
     'credential_hourly_stats': {'api_keys'},
-=======
->>>>>>> b3c67fc (📦 Auto-sync: 2026-06-15 23:46:59)
     'app_logs': {'details'},
 }
 

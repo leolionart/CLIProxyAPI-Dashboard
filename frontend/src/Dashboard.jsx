@@ -385,27 +385,25 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
         return '$' + Math.round(cost).toLocaleString('en-US')
     }
 
-    // API key usage. When CPA_USAGE_DB_PATH is mounted, collector resolves
-    // CPA usage_events.api_key_hash back to configured inbound API-key names.
+    // API key usage must come from credential stats. Endpoint usage has names
+    // like "responses" or "completions" and should not be shown as API keys.
     const endpointUsage = useMemo(() => {
-        const sourceRows = (rawEndpointUsage || []).length > 0
-            ? rawEndpointUsage
-            : (credentialData?.api_keys || []).map((key) => ({
-                api_endpoint: key.api_key_name || 'unknown',
-                request_count: key.total_requests || 0,
-                total_tokens: key.total_tokens || 0,
-                input_tokens: key.input_tokens || 0,
-                output_tokens: key.output_tokens || 0,
-                reasoning_tokens: key.reasoning_tokens || 0,
-                cached_tokens: key.cached_tokens || 0,
-                estimated_cost_usd: key.estimated_cost_usd || 0,
-                success_count: key.success_count || 0,
-                failure_count: key.failure_count || 0,
-                models: key.models || {},
-                endpoints: key.endpoints || [],
-                credentials_used: key.credentials_used || [],
-                isApiKeyUsage: true,
-            }))
+        const sourceRows = (credentialData?.api_keys || []).map((key) => ({
+            api_endpoint: key.api_key_name || 'unknown',
+            request_count: key.total_requests || 0,
+            total_tokens: key.total_tokens || 0,
+            input_tokens: key.input_tokens || 0,
+            output_tokens: key.output_tokens || 0,
+            reasoning_tokens: key.reasoning_tokens || 0,
+            cached_tokens: key.cached_tokens || 0,
+            estimated_cost_usd: key.estimated_cost_usd || 0,
+            success_count: key.success_count || 0,
+            failure_count: key.failure_count || 0,
+            models: key.models || {},
+            endpoints: key.endpoints || [],
+            credentials_used: key.credentials_used || [],
+            isApiKeyUsage: true,
+        }))
 
         const normalized = sourceRows
             .map(m => {
@@ -437,7 +435,7 @@ function Dashboard({ stats, dailyStats, modelUsage, hourlyStats, loading, isRefr
             return normalized.sort((a, b) => (b.tokens || 0) - (a.tokens || 0))
         }
         return normalized.sort((a, b) => (b.requests || 0) - (a.requests || 0))
-    }, [credentialData, rawEndpointUsage, endpointSort])
+    }, [credentialData, endpointSort])
 
     const apiKeyTotalCost = endpointUsage.reduce((sum, key) => sum + (key.cost || key.estimated_cost_usd || 0), 0)
 
