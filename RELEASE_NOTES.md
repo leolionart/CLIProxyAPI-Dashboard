@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased - 2026-06-19 06:57 +07
+
+Generated before push from commits:
+
+- `569d7ac` Remove tracked backup files
+
 ## Unreleased - 2026-06-19
 
 - Fixed the API Keys dashboard so it uses resolved credential API-key stats instead of endpoint names such as `responses`, `completions`, or `*action`.
