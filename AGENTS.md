@@ -164,3 +164,18 @@ Chỉ được đóng incident khi đủ tất cả:
 - Release note paths hợp lệ: `CHANGELOG.md`, `Changelog.md`, `changelog.md`,
   `RELEASE_NOTES.md`, `RELEASE-NOTES.md`, `docs/releases/*.md`,
   `docs/release-notes/*.md`.
+
+## 10) GitHub Release notes
+
+- Không được xem commit `RELEASE_NOTES.md` là thay thế cho GitHub Release.
+  Đây là hai artifact khác nhau.
+- Nếu user nói `release notes`, `release`, `GitHub release`, `dùng github cli`,
+  hoặc hỏi vì sao sau khi push chưa có release notes, phải dùng GitHub CLI:
+  - `gh release list` để xem release mới nhất.
+  - `gh release view <tag>` để kiểm tra release hiện tại.
+  - `gh release create <tag> --target main --title ... --notes ...` để tạo
+    release mới, hoặc `gh release edit <tag> --notes ...` để sửa release sẵn có.
+- Notes trên GitHub Release phải tóm tắt thay đổi từ release/tag trước tới
+  commit hiện tại, gồm user-facing fixes, deploy/config changes, và cleanup
+  đáng kể.
+- Sau khi tạo/sửa, verify bằng `gh release view` và trả lại URL release cho user.
