@@ -1,5 +1,11 @@
 # Release Notes
 
+## Unreleased - 2026-06-19 07:45 +07
+
+Generated before push from commits:
+
+- `32c420b` Clarify GitHub release notes workflow
+
 ## Unreleased - 2026-06-19 07:40 +07
 
 - Added collector health diagnostics for the CPA-Manager `usage.sqlite` mount, including configured path, existence, and readability.
