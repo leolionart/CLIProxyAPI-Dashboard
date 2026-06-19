@@ -64,6 +64,7 @@ def _env_url(name: str, default: str) -> str:
 DATABASE_URL = os.getenv('DATABASE_URL', '')
 CLIPROXY_URL = _env_url('CLIPROXY_URL', 'http://localhost:8317')
 CLIPROXY_USAGE_URL = _env_url('CLIPROXY_USAGE_URL', CLIPROXY_URL)
+CPA_USAGE_DB_PATH = str(os.getenv('CPA_USAGE_DB_PATH') or os.getenv('CLIPROXY_USAGE_DB_PATH') or '').strip()
 CLIPROXY_MANAGEMENT_KEY = os.getenv('CLIPROXY_MANAGEMENT_KEY', '')
 COLLECTOR_INTERVAL = _env_int('COLLECTOR_INTERVAL_SECONDS', 60)
 CREDENTIAL_SYNC_INTERVAL = _env_int('CREDENTIAL_SYNC_INTERVAL_SECONDS', COLLECTOR_INTERVAL)
@@ -131,6 +132,20 @@ LLM_PRICES_URL = "https://www.llm-prices.com/current-v1.json"
 db_client: Optional[PostgreSQLClient] = None
 remote_pricing_cache: Dict[str, Dict[str, float]] = {}
 remote_pricing_last_fetch: float = 0
+
+
+def _cpa_usage_db_status() -> Dict[str, Any]:
+    status = {
+        'configured': bool(CPA_USAGE_DB_PATH),
+        'path': CPA_USAGE_DB_PATH or None,
+        'exists': False,
+        'readable': False,
+    }
+    if not CPA_USAGE_DB_PATH:
+        return status
+    status['exists'] = os.path.exists(CPA_USAGE_DB_PATH)
+    status['readable'] = os.path.isfile(CPA_USAGE_DB_PATH) and os.access(CPA_USAGE_DB_PATH, os.R_OK)
+    return status
 
 # --- Flask App Setup ---
 flask_app = Flask(__name__)
@@ -514,7 +529,14 @@ def _log_app_event(*, source: str, category: str, severity: str, title: str, mes
 @api_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""
-    return jsonify({"status": "healthy", "timestamp": datetime.now(APP_TIMEZONE).isoformat()})
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now(APP_TIMEZONE).isoformat(),
+        "usage_source": {
+            "cliproxy_usage_url": CLIPROXY_USAGE_URL,
+            "cpa_usage_db": _cpa_usage_db_status(),
+        },
+    })
 
 
 @api_bp.route('/auth/login', methods=['POST'])
@@ -1006,6 +1028,7 @@ def init_db() -> PostgreSQLClient:
 
 def fetch_usage_data() -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     started = time.time()
+    cpa_db_status = _cpa_usage_db_status()
 
     sqlite_syncer = CredentialStatsSync(
         CLIPROXY_URL,
@@ -1022,10 +1045,26 @@ def fetch_usage_data() -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
             'cliproxy_url': CLIPROXY_URL,
             'cliproxy_usage_url': CLIPROXY_USAGE_URL,
             'source': 'cpa_sqlite',
-            'cpa_usage_db_path': os.environ.get('CPA_USAGE_DB_PATH') or os.environ.get('CLIPROXY_USAGE_DB_PATH'),
+            'cpa_usage_db_path': CPA_USAGE_DB_PATH,
+            'cpa_usage_db_status': cpa_db_status,
             'latency_ms': duration_ms,
             'has_usage': True,
         }
+
+    if cpa_db_status['configured'] and not cpa_db_status['readable']:
+        logger.warning(
+            "CPA usage SQLite is configured but not readable at %s; falling back to management usage API",
+            CPA_USAGE_DB_PATH,
+        )
+        _log_app_event(
+            source='collector',
+            category='api',
+            severity='warn',
+            title='CPA SQLite unavailable',
+            message='CPA usage SQLite is configured but not readable; collector is falling back to the management usage API.',
+            details=cpa_db_status,
+            event_uid='collector:cpa-sqlite-unavailable',
+        )
 
     url = f"{CLIPROXY_USAGE_URL}/v0/management/usage"
     headers = {'Authorization': f'Bearer {CLIPROXY_MANAGEMENT_KEY}'} if CLIPROXY_MANAGEMENT_KEY else {}
@@ -1041,6 +1080,7 @@ def fetch_usage_data() -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
             'cliproxy_url': CLIPROXY_URL,
             'cliproxy_usage_url': CLIPROXY_USAGE_URL,
             'source': 'management_api',
+            'cpa_usage_db_status': cpa_db_status,
             'http_status': response.status_code,
             'latency_ms': duration_ms,
             'payload_bytes': len(response.content or b''),

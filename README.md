@@ -85,6 +85,11 @@ CLIPROXY_URL=http://host.docker.internal:8317
 CLIPROXY_USAGE_URL=http://host.docker.internal:18317
 CLIPROXY_MANAGEMENT_KEY=<your-management-secret>
 
+# Recommended for CPA-Manager on the same Docker host.
+# Replace the volume name if your CPA-Manager stack uses a different one.
+CPA_USAGE_DATA_DIR=/var/lib/docker/volumes/cli-proxy-api_cpa_manager_data/_data
+CPA_USAGE_DB_PATH=/cpa-data/usage.sqlite
+
 # Optional
 COLLECTOR_INTERVAL_SECONDS=300
 TIMEZONE_OFFSET_HOURS=7
@@ -103,6 +108,9 @@ Notes:
 - `ADMIN_ALLOWED_ORIGINS` is optional. Leave it empty for the default same-compose setup; set it only if you want stricter Origin/Referer enforcement.
 - `CLIPROXY_URL` is used for CLIProxyAPI management endpoints such as auth files.
 - `CLIPROXY_USAGE_URL` is used only for `/v0/management/usage`. For CPA-Manager, set it to the usage service URL.
+- `CPA_USAGE_DATA_DIR` should point to the host directory that contains CPA-Manager `usage.sqlite`.
+  When this SQLite file is mounted, the collector uses it as the source of truth for inbound API-key attribution, so the API Keys dashboard can show key aliases/names instead of raw hashes.
+  If the path is configured but unreadable, `/api/collector/health` and collector logs report the problem before falling back to the management usage API.
 
 ### 5) Start services
 ```bash

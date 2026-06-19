@@ -577,7 +577,19 @@ class CredentialStatsSync:
         SQLite DB lets the dashboard recover true inbound API-key attribution.
         """
         db_path = os.environ.get('CPA_USAGE_DB_PATH') or os.environ.get('CLIPROXY_USAGE_DB_PATH')
-        if not db_path or not os.path.exists(db_path):
+        if not db_path:
+            return None
+        if not os.path.exists(db_path):
+            logger.warning(
+                "CPA usage SQLite path is configured but does not exist: %s",
+                db_path,
+            )
+            return None
+        if not os.access(db_path, os.R_OK):
+            logger.warning(
+                "CPA usage SQLite path is configured but not readable: %s",
+                db_path,
+            )
             return None
 
         key_by_hash = self._api_key_hash_map()
