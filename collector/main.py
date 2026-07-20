@@ -60,22 +60,33 @@ def _env_url(name: str, default: str) -> str:
     return (os.getenv(name) or default).strip().rstrip('/')
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, 'true' if default else 'false')).strip().lower()
+    return raw in {'1', 'true', 'yes', 'on'}
+
+
 # Configuration from environment
 DATABASE_URL = os.getenv('DATABASE_URL', '')
 CLIPROXY_URL = _env_url('CLIPROXY_URL', 'http://localhost:8317')
 CLIPROXY_USAGE_URL = _env_url('CLIPROXY_USAGE_URL', CLIPROXY_URL)
 CPA_USAGE_DB_PATH = str(os.getenv('CPA_USAGE_DB_PATH') or os.getenv('CLIPROXY_USAGE_DB_PATH') or '').strip()
 CLIPROXY_MANAGEMENT_KEY = os.getenv('CLIPROXY_MANAGEMENT_KEY', '')
-COLLECTOR_INTERVAL = _env_int('COLLECTOR_INTERVAL_SECONDS', 60)
+COLLECTOR_INTERVAL = _env_int('COLLECTOR_INTERVAL_SECONDS', 300)
 CREDENTIAL_SYNC_INTERVAL = _env_int('CREDENTIAL_SYNC_INTERVAL_SECONDS', COLLECTOR_INTERVAL)
 APP_LOG_CLEANUP_INTERVAL_MINUTES = _env_int('APP_LOG_CLEANUP_INTERVAL_MINUTES', 30)
 TRIGGER_PORT = _env_int('COLLECTOR_TRIGGER_PORT', 5001)
 
-ADMIN_AUTH_REQUIRED = str(os.getenv('ADMIN_AUTH_REQUIRED', 'false')).strip().lower() in {'1', 'true', 'yes', 'on'}
+RAW_SNAPSHOT_ENABLED = _env_bool('RAW_SNAPSHOT_ENABLED', True)
+RAW_SNAPSHOT_RETENTION_DAYS = _env_int('RAW_SNAPSHOT_RETENTION_DAYS', 3)
+RAW_SNAPSHOT_MIN_INTERVAL_HOURS = _env_int('RAW_SNAPSHOT_MIN_INTERVAL_HOURS', 24)
+RAW_SNAPSHOT_CLEANUP_BATCH_SIZE = _env_int('RAW_SNAPSHOT_CLEANUP_BATCH_SIZE', 1000)
+RAW_SNAPSHOT_CLEANUP_MAX_BATCHES = _env_int('RAW_SNAPSHOT_CLEANUP_MAX_BATCHES', 50)
+
+ADMIN_AUTH_REQUIRED = _env_bool('ADMIN_AUTH_REQUIRED', False)
 ADMIN_PASSWORD = str(os.getenv('ADMIN_PASSWORD', '')).strip()
 ADMIN_SESSION_COOKIE_NAME = str(os.getenv('ADMIN_SESSION_COOKIE_NAME', 'cliproxy_admin_session')).strip() or 'cliproxy_admin_session'
 ADMIN_SESSION_TTL_DAYS = _env_int('ADMIN_SESSION_TTL_DAYS', 30)
-ADMIN_SESSION_SECURE_COOKIE = str(os.getenv('ADMIN_SESSION_SECURE_COOKIE', 'false')).strip().lower() in {'1', 'true', 'yes', 'on'}
+ADMIN_SESSION_SECURE_COOKIE = _env_bool('ADMIN_SESSION_SECURE_COOKIE', False)
 ADMIN_SESSION_SAMESITE = str(os.getenv('ADMIN_SESSION_SAMESITE', 'Lax')).strip().capitalize() or 'Lax'
 if ADMIN_SESSION_SAMESITE not in {'Lax', 'Strict', 'None'}:
     ADMIN_SESSION_SAMESITE = 'Lax'
@@ -84,7 +95,7 @@ ADMIN_ALLOWED_ORIGINS = [origin.strip().rstrip('/') for origin in str(os.getenv(
 LOG_VERBOSITY = str(os.getenv('LOG_VERBOSITY', 'normal')).strip().lower()
 if LOG_VERBOSITY not in {'minimal', 'normal', 'debug'}:
     LOG_VERBOSITY = 'normal'
-LOG_DEBUG_EVENTS = str(os.getenv('LOG_DEBUG_EVENTS', 'false')).strip().lower() in {'1', 'true', 'yes', 'on'}
+LOG_DEBUG_EVENTS = _env_bool('LOG_DEBUG_EVENTS', False)
 LOG_DEBUG_EVENTS_MAX_PER_SYNC = _env_int('LOG_DEBUG_EVENTS_MAX_PER_SYNC', 200, min_value=0)
 APP_LOG_RETENTION_DAYS = _env_int('APP_LOG_RETENTION_DAYS', 30)
 
@@ -132,6 +143,8 @@ LLM_PRICES_URL = "https://www.llm-prices.com/current-v1.json"
 db_client: Optional[PostgreSQLClient] = None
 remote_pricing_cache: Dict[str, Dict[str, float]] = {}
 remote_pricing_last_fetch: float = 0
+raw_snapshot_cleanup_lock = threading.Lock()
+last_raw_snapshot_cleanup_day: Optional[date] = None
 
 
 def _cpa_usage_db_status() -> Dict[str, Any]:
@@ -396,6 +409,130 @@ def _normalize_log_category(value: Any) -> str:
 
 def _safe_text(value: Any, max_len: int = 1000) -> str:
     return str(value or '').strip()[:max_len]
+
+
+def _should_store_raw_snapshot(latest_raw_collected_at: Any, now: Optional[datetime] = None) -> Tuple[bool, str]:
+    """Return whether this sync should keep raw_data for optional debugging."""
+    if not RAW_SNAPSHOT_ENABLED:
+        return False, 'disabled'
+
+    now_utc = (now or _utcnow()).astimezone(timezone.utc)
+    latest = _parse_iso_datetime(latest_raw_collected_at)
+    if latest is None:
+        return True, 'first_raw_snapshot'
+
+    min_age = timedelta(hours=RAW_SNAPSHOT_MIN_INTERVAL_HOURS)
+    if latest <= now_utc - min_age:
+        return True, 'interval_elapsed'
+
+    return False, 'sample_interval_not_elapsed'
+
+
+def _build_usage_snapshot_record(
+    *,
+    data: Dict[str, Any],
+    usage: Dict[str, Any],
+    cumulative_cost_usd: float,
+    store_raw_data: bool,
+) -> Dict[str, Any]:
+    """Build the compact snapshot row used by the collector."""
+    return {
+        'raw_data': data if store_raw_data else None,
+        'total_requests': usage.get('total_requests', 0),
+        'success_count': usage.get('success_count', 0),
+        'failure_count': usage.get('failure_count', 0),
+        'total_tokens': usage.get('total_tokens', 0),
+        'cumulative_cost_usd': cumulative_cost_usd,
+    }
+
+
+def _resolve_raw_snapshot_policy(now: Optional[datetime] = None) -> Dict[str, Any]:
+    latest_raw = None
+    try:
+        latest_raw = db_client.latest_raw_snapshot_collected_at() if db_client else None
+    except Exception as e:
+        logger.error('Failed to read latest raw snapshot timestamp: %s', e, exc_info=True)
+    store_raw, reason = _should_store_raw_snapshot(latest_raw, now=now)
+    return {
+        'enabled': RAW_SNAPSHOT_ENABLED,
+        'store_raw_data': store_raw,
+        'reason': reason,
+        'latest_raw_collected_at': latest_raw.isoformat() if hasattr(latest_raw, 'isoformat') else latest_raw,
+        'min_interval_hours': RAW_SNAPSHOT_MIN_INTERVAL_HOURS,
+        'retention_days': RAW_SNAPSHOT_RETENTION_DAYS,
+    }
+
+
+def _run_raw_snapshot_retention_cleanup(run_id: Optional[str] = None, force: bool = False) -> Dict[str, Any]:
+    """Null expired raw_data in bounded batches, at most once per local day unless forced."""
+    global last_raw_snapshot_cleanup_day
+
+    if not db_client:
+        return {'skipped': True, 'reason': 'missing_db_client'}
+
+    today_local = datetime.now(APP_TIMEZONE).date()
+    if not force and last_raw_snapshot_cleanup_day == today_local:
+        return {'skipped': True, 'reason': 'already_ran_today'}
+
+    if not raw_snapshot_cleanup_lock.acquire(blocking=False):
+        return {'skipped': True, 'reason': 'already_running'}
+
+    try:
+        if not force and last_raw_snapshot_cleanup_day == today_local:
+            return {'skipped': True, 'reason': 'already_ran_today'}
+
+        started = time.time()
+        cutoff = _utcnow() - timedelta(days=RAW_SNAPSHOT_RETENTION_DAYS)
+        result = db_client.null_expired_raw_snapshots(
+            cutoff=cutoff,
+            batch_size=RAW_SNAPSHOT_CLEANUP_BATCH_SIZE,
+            max_batches=RAW_SNAPSHOT_CLEANUP_MAX_BATCHES,
+        )
+        duration_ms = int((time.time() - started) * 1000)
+        last_raw_snapshot_cleanup_day = today_local
+        summary = {
+            'skipped': False,
+            'rows_nullified': int(result.get('rows_nullified', 0) or 0),
+            'batches': int(result.get('batches', 0) or 0),
+            'duration_ms': duration_ms,
+            'cutoff': cutoff.isoformat(),
+            'retention_days': RAW_SNAPSHOT_RETENTION_DAYS,
+            'batch_size': RAW_SNAPSHOT_CLEANUP_BATCH_SIZE,
+            'max_batches': RAW_SNAPSHOT_CLEANUP_MAX_BATCHES,
+        }
+        logger.info(
+            'Raw snapshot retention cleanup nullified %s rows in %s batch(es), duration=%sms, cutoff=%s',
+            summary['rows_nullified'],
+            summary['batches'],
+            duration_ms,
+            summary['cutoff'],
+        )
+        if run_id:
+            _log_sync_event(
+                run_id=run_id,
+                source='collector',
+                category='db',
+                severity='info',
+                title='Raw snapshot retention cleanup',
+                message='Expired usage_snapshots.raw_data values were set to NULL.',
+                details=summary,
+            )
+        return summary
+    except Exception as e:
+        logger.error('Raw snapshot retention cleanup failed: %s', e, exc_info=True)
+        if run_id:
+            _log_sync_event(
+                run_id=run_id,
+                source='collector',
+                category='db',
+                severity='error',
+                title='Raw snapshot retention cleanup failed',
+                message=f'Failed to null expired usage_snapshots.raw_data values: {e}',
+                details={'error': str(e)},
+            )
+        return {'skipped': False, 'error': str(e)}
+    finally:
+        raw_snapshot_cleanup_lock.release()
 
 
 @flask_app.before_request
@@ -1410,6 +1547,7 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
             'snapshot_cost_update': 0,
             'daily_stats_upsert': 0,
             'credential_hourly_stats_upsert': 0,
+            'raw_snapshot_cleanup': 0,
         }
 
         # Current cumulative values from CLIProxy
@@ -1418,14 +1556,10 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
         current_failure = usage.get('failure_count', 0)
         current_tokens = usage.get('total_tokens', 0)
         
-        # Insert snapshot with cumulative data
-        snapshot_data = {
-            'raw_data': data,
-            'total_requests': current_requests,
-            'success_count': current_success,
-            'failure_count': current_failure,
-            'total_tokens': current_tokens
-        }
+        raw_snapshot_policy = _resolve_raw_snapshot_policy()
+        cleanup_summary = _run_raw_snapshot_retention_cleanup(run_id=run_id)
+        db_timings_ms['raw_snapshot_cleanup'] = int(cleanup_summary.get('duration_ms', 0) or 0)
+
         # Track cumulative cost (sum of costs from all snapshots so far)
         last_cost_resp = db_client.table('usage_snapshots') \
             .select('cumulative_cost_usd') \
@@ -1433,7 +1567,12 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
             .limit(1) \
             .execute()
         last_cost_total = float(last_cost_resp.data[0].get('cumulative_cost_usd', 0) or 0) if last_cost_resp.data else 0.0
-        snapshot_data['cumulative_cost_usd'] = last_cost_total  # placeholder, updated after cost calc
+        snapshot_data = _build_usage_snapshot_record(
+            data=data,
+            usage=usage,
+            cumulative_cost_usd=last_cost_total,
+            store_raw_data=raw_snapshot_policy['store_raw_data'],
+        )
 
         t0 = time.time()
         snapshot_result = db_client.table('usage_snapshots').insert(snapshot_data).execute()
@@ -1495,6 +1634,8 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
                     details={
                         'snapshot_id': snapshot_id,
                         'source': source,
+                        'raw_snapshot_policy': raw_snapshot_policy,
+                        'raw_snapshot_cleanup': cleanup_summary,
                         'model_rows_inserted': len(model_records),
                         'db_timings_ms': db_timings_ms,
                         **rebuild_summary,
@@ -1512,6 +1653,8 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
                 'run_id': run_id,
                 'source': source,
                 'snapshot_id': snapshot_id,
+                'raw_snapshot_policy': raw_snapshot_policy,
+                'raw_snapshot_cleanup': cleanup_summary,
                 'model_rows_inserted': len(model_records),
                 'daily_rebuild': rebuild_summary,
                 'credential_hourly_rebuild': hourly_summary,
@@ -1952,6 +2095,8 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
                     'daily_total_requests': daily_data['total_requests'],
                     'daily_total_tokens': daily_data['total_tokens'],
                     'daily_total_cost_usd': round(float(daily_data['estimated_cost_usd'] or 0), 6),
+                    'raw_snapshot_policy': raw_snapshot_policy,
+                    'raw_snapshot_cleanup': cleanup_summary,
                     'model_rows_inserted': len(model_records),
                     'db_timings_ms': db_timings_ms,
                     'duration_ms': int((time.time() - started_at) * 1000),
@@ -1969,6 +2114,8 @@ def store_usage_data(data: Dict[str, Any], run_id: Optional[str] = None) -> Tupl
             'daily_total_requests': daily_data['total_requests'],
             'daily_total_tokens': daily_data['total_tokens'],
             'daily_total_cost_usd': round(float(daily_data['estimated_cost_usd'] or 0), 6),
+            'raw_snapshot_policy': raw_snapshot_policy,
+            'raw_snapshot_cleanup': cleanup_summary,
             'db_timings_ms': db_timings_ms,
             'duration_ms': int((time.time() - started_at) * 1000),
         }
@@ -2083,6 +2230,13 @@ def main():
         db_client = init_db()
         logger.info("PostgreSQL client initialized.")
         db_client.run_migrations()
+        raw_cleanup = _run_raw_snapshot_retention_cleanup(force=True)
+        if not raw_cleanup.get('skipped') and not raw_cleanup.get('error'):
+            logger.info(
+                "Initial raw snapshot cleanup nullified %s rows in %s ms.",
+                raw_cleanup.get('rows_nullified', 0),
+                raw_cleanup.get('duration_ms', 0),
+            )
         deleted = _cleanup_old_app_logs()
         if deleted > 0:
             logger.info(f"Initial app logs cleanup removed {deleted} rows older than today.")

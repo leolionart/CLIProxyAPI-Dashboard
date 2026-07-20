@@ -114,6 +114,10 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
 CREATE INDEX IF NOT EXISTS idx_usage_snapshots_collected_at
     ON usage_snapshots(collected_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_usage_snapshots_raw_data_retention
+    ON usage_snapshots(collected_at ASC)
+    WHERE raw_data IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_model_usage_snapshot_id
     ON model_usage(snapshot_id);
 

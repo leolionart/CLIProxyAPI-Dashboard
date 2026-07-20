@@ -276,6 +276,67 @@ class PostgreSQLClient:
     def table(self, name: str) -> QueryBuilder:
         return QueryBuilder(self._pool, name)
 
+    def latest_raw_snapshot_collected_at(self) -> Optional[Any]:
+        """Return collected_at for the newest snapshot that still has debug raw_data."""
+        conn = self._pool.getconn()
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT collected_at
+                    FROM usage_snapshots
+                    WHERE raw_data IS NOT NULL
+                    ORDER BY collected_at DESC
+                    LIMIT 1
+                """)
+                row = cur.fetchone()
+                return row['collected_at'] if row else None
+        finally:
+            self._pool.putconn(conn)
+
+    def null_expired_raw_snapshots(self, cutoff: Any, batch_size: int = 1000, max_batches: int = 10) -> Dict[str, int]:
+        """
+        Set expired usage_snapshots.raw_data to NULL in bounded batches.
+
+        Snapshot rows are intentionally preserved because model_usage references
+        usage_snapshots(id) with ON DELETE CASCADE.
+        """
+        conn = self._pool.getconn()
+        total = 0
+        batches = 0
+        try:
+            with conn.cursor() as cur:
+                for _ in range(max(1, int(max_batches))):
+                    cur.execute("""
+                        WITH victims AS (
+                            SELECT id
+                            FROM usage_snapshots
+                            WHERE raw_data IS NOT NULL
+                              AND collected_at < %s
+                            ORDER BY collected_at ASC
+                            LIMIT %s
+                            FOR UPDATE SKIP LOCKED
+                        )
+                        UPDATE usage_snapshots AS s
+                        SET raw_data = NULL
+                        FROM victims
+                        WHERE s.id = victims.id
+                    """, (cutoff, max(1, int(batch_size))))
+                    affected = cur.rowcount
+                    conn.commit()
+                    if affected <= 0:
+                        break
+                    total += affected
+                    batches += 1
+                    if affected < batch_size:
+                        break
+
+            return {'rows_nullified': total, 'batches': batches}
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._pool.putconn(conn)
+
     def run_migrations(self, migrations_dir: Optional[str] = None) -> None:
         """
         Apply pending SQL migration files from migrations_dir (default: ./migrations/).

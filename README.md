@@ -93,6 +93,11 @@ CPA_USAGE_DB_PATH=/cpa-data/usage.sqlite
 # Optional
 COLLECTOR_INTERVAL_SECONDS=300
 TIMEZONE_OFFSET_HOURS=7
+RAW_SNAPSHOT_ENABLED=true
+RAW_SNAPSHOT_RETENTION_DAYS=3
+RAW_SNAPSHOT_MIN_INTERVAL_HOURS=24
+RAW_SNAPSHOT_CLEANUP_BATCH_SIZE=1000
+RAW_SNAPSHOT_CLEANUP_MAX_BATCHES=50
 ADMIN_AUTH_REQUIRED=false
 ADMIN_PASSWORD=change-me
 ADMIN_SESSION_TTL_DAYS=30
@@ -110,6 +115,9 @@ Notes:
 - `CLIPROXY_USAGE_URL` is used only for `/v0/management/usage`. For CPA-Manager, set it to the usage service URL.
 - `CPA_USAGE_DATA_DIR` should point to the host directory that contains CPA-Manager `usage.sqlite`.
   When this SQLite file is mounted, the collector uses it as the source of truth for inbound API-key attribution, so the API Keys dashboard can show key aliases/names instead of raw hashes.
+- Dashboard/statistics reads use normalized rows (`daily_stats`, `credential_daily_stats`, `credential_hourly_stats`, `model_usage`, `skill_daily_stats`, `skill_runs`). `usage_snapshots.raw_data` is optional debug data only.
+- `RAW_SNAPSHOT_ENABLED=true` keeps raw debug payloads, but the default `RAW_SNAPSHOT_MIN_INTERVAL_HOURS=24` stores roughly one raw payload per day instead of every 5-minute run.
+- `RAW_SNAPSHOT_RETENTION_DAYS=3` means expired `usage_snapshots.raw_data` values are set to `NULL`; snapshot rows are not deleted, so `model_usage` history is preserved.
   If the path is configured but unreadable, `/api/collector/health` and collector logs report the problem before falling back to the management usage API.
 
 ### 5) Start services
@@ -346,6 +354,109 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 python main.py
 ```
+
+</details>
+
+---
+
+<details>
+<summary><h2>Raw snapshot retention</h2></summary>
+
+The collector keeps `usage_snapshots` rows as the cumulative counter timeline used
+for delta calculation and model joins. It no longer stores the full cumulative
+CLIProxy payload on every run.
+
+Default behavior:
+
+- Every collector run inserts compact normalized snapshot counters and `model_usage` rows.
+- `raw_data` is written only when `RAW_SNAPSHOT_ENABLED=true` and the newest retained raw snapshot is at least `RAW_SNAPSHOT_MIN_INTERVAL_HOURS` old.
+- Expired `raw_data` is set to `NULL` in bounded batches. Rows are never deleted because `model_usage.snapshot_id` has `ON DELETE CASCADE`.
+- Cleanup runs at collector startup and then at most once per local day. Logs include `rows_nullified`, `batches`, `duration_ms`, `cutoff`, `batch_size`, and `max_batches`.
+
+Production deployment:
+
+```bash
+# 1. Backup first because this changes large TOAST values.
+docker exec cliproxy-postgres pg_dump -U cliproxy -d cliproxy -Fc -f /tmp/cliproxy-before-raw-retention.dump
+docker cp cliproxy-postgres:/tmp/cliproxy-before-raw-retention.dump ./cliproxy-before-raw-retention.dump
+
+# 2. Pull and restart through compose so collector applies migration 0009.
+docker compose pull collector frontend
+docker compose up -d
+
+# 3. Watch collector migration and cleanup logs.
+docker compose logs -f collector
+```
+
+Rollback:
+
+```bash
+# Roll back app images if needed. The migration only adds indexes, so it is backward-compatible.
+docker compose pull collector frontend
+docker compose up -d collector frontend
+```
+
+If you need to pause raw cleanup during investigation, set:
+
+```env
+RAW_SNAPSHOT_RETENTION_DAYS=3650
+RAW_SNAPSHOT_CLEANUP_MAX_BATCHES=1
+```
+
+SQL verification:
+
+```sql
+-- Confirm migration indexes exist.
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE tablename = 'usage_snapshots'
+  AND indexname IN (
+    'idx_usage_snapshots_collected_at',
+    'idx_usage_snapshots_raw_data_retention'
+  );
+
+-- Current raw debug footprint.
+WITH raw_counts AS (
+  SELECT
+    count(*) FILTER (WHERE raw_data IS NOT NULL) AS rows_with_raw_data,
+    count(*) FILTER (WHERE raw_data IS NULL) AS rows_without_raw_data
+  FROM usage_snapshots
+)
+SELECT
+  raw_counts.rows_with_raw_data,
+  raw_counts.rows_without_raw_data,
+  pg_size_pretty(pg_total_relation_size('usage_snapshots')) AS usage_snapshots_total,
+  CASE
+    WHEN toast.relid = 0 THEN '0 bytes'
+    ELSE pg_size_pretty(pg_total_relation_size(toast.relid))
+  END AS usage_snapshots_toast
+FROM raw_counts
+CROSS JOIN (
+  SELECT c.reltoastrelid AS relid
+  FROM pg_class c
+  WHERE c.oid = 'usage_snapshots'::regclass
+) toast;
+
+-- Expired raw values remaining after a cleanup cycle.
+SELECT count(*) AS expired_raw_rows
+FROM usage_snapshots
+WHERE raw_data IS NOT NULL
+  AND collected_at < now() - interval '3 days';
+
+-- Recent normalized rows still exist and keep model_usage joins valid.
+SELECT s.id, s.collected_at, s.raw_data IS NOT NULL AS has_raw_data, count(mu.id) AS model_rows
+FROM usage_snapshots s
+LEFT JOIN model_usage mu ON mu.snapshot_id = s.id
+GROUP BY s.id, s.collected_at, s.raw_data IS NOT NULL
+ORDER BY s.collected_at DESC
+LIMIT 10;
+```
+
+Expected storage growth:
+
+- Before: with a full cumulative ledger written every 5 minutes, production observed roughly 600-680 MB/day.
+- After: normal runs add compact counters plus `model_usage` rows. Raw payload growth is about one retained payload/day, capped by `RAW_SNAPSHOT_RETENTION_DAYS`.
+- With the defaults, steady-state raw debug storage is roughly 3 raw payloads plus normalized rows, so growth should no longer scale with the full historical ledger.
 
 </details>
 
